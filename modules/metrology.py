@@ -583,3 +583,149 @@ def flange_metrology(command_queue, controller, numpoints, circlediam, Xcenter, 
     controller.runtime.commands.end_command_queue(command_queue)
 
     print("Flange metrology complete.")
+
+
+def plane_metrology(command_queue, controller, xstep, ystep, circlediam, Xcenter, Ycenter,
+                    Zstart, moveheight, Zdrop, outname, comport="COM4", lifterSettleTime=0.5):
+    """
+    Perform plane metrology by raster scanning within a circular aperture.
+
+    Parameters
+    ----------
+    command_queue : Automation1 CommandQueue
+        The command queue used to issue motion commands.
+    controller : Automation1 Controller
+        The controller object used to query axis status.
+    xstep, ystep : float
+        Step sizes in X and Y directions [mm].
+    circlediam : float
+        Diameter of the circular scan area [mm].
+    Xcenter, Ycenter : float
+        Center of the measurement circle [mm].
+    Zstart : float
+        Reference Z height (safe retract), usually 0.0 [mm].
+    moveheight : float
+        Safe Z height above wafer surface [mm].
+    Zdrop : float
+        Probe depth below moveheight for each touch [mm].
+    outname : str
+        Path to output data file for metrology results.
+    comport : str, optional
+        Serial COM port for the gauge sensor (default: "COM4").
+    lifterSettleTime : float, optional
+        Time to wait after probe contact before reading sensor [s].
+
+    Notes
+    -----
+    - Output file format is always: X, Y, ZA, sensor.
+    """
+
+    if os.path.exists(outname):
+        print("Metrology File Present, stopping to avoid overwrite")
+        return
+
+    command_queue.pause()
+
+    # Enable axes
+    for axis in ["X", "Y", "ZA"]:
+        command_queue.commands.motion.enable(axis)
+
+    # Retract to Zstart
+    command_queue.commands.motion.moveabsolute(
+        axes=["ZA"], positions=[Zstart], speeds=[3.0]
+    )
+    command_queue.commands.motion.waitforinposition(["ZA"])
+
+    # Define X scan range
+    xstart = Xcenter - circlediam / 2.0
+    xstop = xstart + circlediam
+    xval = xstart
+
+    # Pre-position to start
+    command_queue.commands.motion.moveabsolute(
+        axes=["X", "Y"], positions=[xstart, Ycenter], speeds=[3.0, 3.0]
+    )
+    command_queue.commands.motion.waitforinposition(["X", "Y"])
+
+    # Drop to moveheight
+    command_queue.commands.motion.moveabsolute(
+        axes=["ZA"], positions=[moveheight], speeds=[3.0]
+    )
+    command_queue.commands.motion.waitforinposition(["ZA"])
+
+    # Open serial
+    ser = serial.Serial(comport, 9600, timeout=1)
+    time.sleep(0.02)
+
+    try:
+        with open(outname, "w") as outfile:
+            while xval < xstop:
+                # Circle equation for Y bounds
+                half = circlediam / 2.0
+                yspan = math.sqrt(half**2 - (xval - Xcenter) ** 2)
+                ystart = Ycenter - yspan
+                ystop = Ycenter + yspan
+
+                yval = ystart
+                while yval < ystop:
+                    # Move to Y
+                    command_queue.commands.motion.moveabsolute(
+                        axes=["Y"], positions=[yval], speeds=[3.0]
+                    )
+                    command_queue.commands.motion.waitforinposition(["Y"])
+
+                    # Drop probe
+                    command_queue.commands.motion.moveabsolute(
+                        axes=["ZA"], positions=[moveheight - Zdrop], speeds=[2.5]
+                    )
+                    command_queue.commands.motion.waitforinposition(["ZA"])
+
+                    time.sleep(lifterSettleTime)
+
+                    # Reset/read probe
+                    ser.write(b"RMD0\r\n")
+                    time.sleep(0.02)
+                    sensor_reading = ser.read(2048).decode("utf-8").strip()
+
+                    # Query ProgramPositions
+                    config = a1.StatusItemConfiguration()
+                    for axis in ["X", "Y", "ZA"]:
+                        config.axis.add(a1.AxisStatusItem.ProgramPosition, axis)
+                    results = controller.runtime.status.get_status_items(config)
+                    posvals = {
+                        axis: results.axis.get(a1.AxisStatusItem.ProgramPosition, axis).value
+                        for axis in ["X", "Y", "ZA"]
+                    }
+
+                    # Log
+                    outfile.write(
+                        f"{posvals['X']}, {posvals['Y']}, {posvals['ZA']}, {sensor_reading}\n"
+                    )
+
+                    # Retract
+                    command_queue.commands.motion.moveabsolute(
+                        axes=["ZA"], positions=[moveheight], speeds=[3.0]
+                    )
+                    command_queue.commands.motion.waitforinposition(["ZA"])
+
+                    yval += ystep
+
+                xval += xstep
+
+    finally:
+        try:
+            ser.close()
+        except Exception:
+            pass
+
+        # Retract to Zstart
+        command_queue.commands.motion.moveabsolute(
+            axes=["ZA"], positions=[Zstart], speeds=[3.0]
+        )
+        command_queue.commands.motion.waitforinposition(["ZA"])
+
+    command_queue.resume()
+    command_queue.wait_for_empty()
+    controller.runtime.commands.end_command_queue(command_queue)
+
+    print("Plane metrology complete.")
