@@ -166,6 +166,159 @@ def testtouch_metrology(command_queue, controller, numX, numY, lengthX, lengthY,
     print("Metrology Done.")
 
 
+import os, time, serial
+import aerotech_automation1 as a1  # adjust import name if needed
+
+def dressing_metrology(
+    command_queue,
+    controller,
+    numX,
+    numY,
+    lengthX,
+    lengthY,
+    Xstart,
+    Ystart,
+    Zstart,
+    Zdrop,
+    outname,
+    comport="COM4",
+    lifterSettleTime=0.5,
+):
+    """
+    Perform a rectangular raster scan over the lens plate and record gauge outputs.
+
+    Parameters
+    ----------
+    command_queue : Automation1 CommandQueue
+        The command queue used to issue motion commands.
+    controller : Automation1 Controller
+        The controller object used to query axis status.
+    numX, numY : int
+        Number of X and Y sample points.
+    lengthX, lengthY : float
+        Total scan length in X and Y [mm].
+    Xstart, Ystart : float
+        Starting coordinates for the raster [mm].
+    Zstart : float
+        Reference Z height (safe retract) [mm].
+    Zdrop : float
+        Probe depth below Zstart for each touch [mm].
+    outname : str
+        Path to output data file for metrology results.
+    comport : str, optional
+        Serial COM port for the gauge sensor (default: "COM4").
+    lifterSettleTime : float, optional
+        Time to wait after probe contact before reading sensor [s].
+
+    Notes
+    -----
+    - Output file format is always: X, Y, ZA, sensor.
+    """
+
+    if os.path.exists(outname):
+        print("Metrology File Present, stopping to avoid overwrite")
+        return
+
+    command_queue.pause()
+
+    # Enable axes
+    for axis in ["X", "Y", "ZA"]:
+        command_queue.commands.motion.enable(axis)
+
+    # Retract to Zstart
+    command_queue.commands.motion.moveabsolute(
+        axes=["ZA"], positions=[Zstart], speeds=[3.0]
+    )
+    command_queue.commands.motion.waitforinposition(["ZA"])
+
+    # Compute increments
+    incdistX = lengthX / (numX - 1) if numX > 1 else 0
+    incdistY = lengthY / numY if numY > 0 else 0
+
+    # Move to starting XY
+    command_queue.commands.motion.moveabsolute(
+        axes=["X", "Y"], positions=[Xstart, Ystart], speeds=[3.0, 3.0]
+    )
+    command_queue.commands.motion.waitforinposition(["X", "Y"])
+
+    # Open serial port for gauge
+    ser = serial.Serial(comport, 9600, timeout=1)
+    time.sleep(0.02)
+
+    try:
+        with open(outname, "w") as outfile:
+            for xcount in range(numX):
+                x = Xstart + incdistX * xcount
+
+                # Move to beginning of this X "column"
+                command_queue.commands.motion.moveabsolute(
+                    axes=["X", "Y"], positions=[x, Ystart], speeds=[3.0, 3.0]
+                )
+                command_queue.commands.motion.waitforinposition(["X", "Y"])
+
+                for ycount in range(numY):
+                    y = Ystart + incdistY * ycount
+
+                    # Move to (x, y)
+                    command_queue.commands.motion.moveabsolute(
+                        axes=["Y"], positions=[y], speeds=[3.0]
+                    )
+                    command_queue.commands.motion.waitforinposition(["Y"])
+
+                    # Drop probe
+                    command_queue.commands.motion.moveabsolute(
+                        axes=["ZA"], positions=[Zstart - Zdrop], speeds=[2.5]
+                    )
+                    command_queue.commands.motion.waitforinposition(["ZA"])
+
+                    time.sleep(lifterSettleTime)
+
+                    # Reset/read probe
+                    ser.write(b"RMD0\r\n")
+                    time.sleep(0.02)
+                    sensor_reading = ser.read(2048).decode("utf-8").strip()
+
+                    # Query ProgramPositions
+                    config = a1.StatusItemConfiguration()
+                    for axis in ["X", "Y", "ZA"]:
+                        config.axis.add(a1.AxisStatusItem.ProgramPosition, axis)
+                    results = controller.runtime.status.get_status_items(config)
+                    posvals = {
+                        axis: results.axis.get(a1.AxisStatusItem.ProgramPosition, axis).value
+                        for axis in ["X", "Y", "ZA"]
+                    }
+
+                    # Log: X, Y, ZA, sensor
+                    outfile.write(
+                        f"{posvals['X']}, {posvals['Y']}, {posvals['ZA']}, {sensor_reading}\n"
+                    )
+
+                    # Retract
+                    command_queue.commands.motion.moveabsolute(
+                        axes=["ZA"], positions=[Zstart], speeds=[3.0]
+                    )
+                    command_queue.commands.motion.waitforinposition(["ZA"])
+
+    finally:
+        try:
+            ser.close()
+        except Exception:
+            pass
+
+        # Retract at end
+        command_queue.commands.motion.moveabsolute(
+            axes=["ZA"], positions=[Zstart], speeds=[3.0]
+        )
+        command_queue.commands.motion.waitforinposition(["ZA"])
+
+    command_queue.resume()
+    command_queue.wait_for_empty()
+    controller.runtime.commands.end_command_queue(command_queue)
+
+    print("Dressing metrology complete.")
+
+
+
 def lens_metrology(command_queue, controller, circlediam, xstep, ystep, Xcenter, Ycenter, Zstart, moveheight, outname, comport="COM4", lifterSettleTime=0.5):
     """
     Perform lens metrology over a circular region.
