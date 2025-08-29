@@ -175,15 +175,17 @@ def enable_metrologyprobe(controller, state, output_num=0, axis="X", execution_t
         raise ValueError("state must be 'on' or 'off'")
 
     # Set the output
-    controller.commands.io.digitaloutputset(
+    controller.runtime.commands.io.digitaloutputset(
         axis=axis,
         output_num=output_num,
         value=value,
         execution_task_index=execution_task_index,
     )
 
+    time.sleep(1) # pause before querying because of latency 
+
     # Read back the output state
-    current = controller.commands.io.digitaloutputget(
+    current = controller.runtime.commands.io.digitaloutputget(
         axis=axis,
         output_num=output_num,
         execution_task_index=execution_task_index,
