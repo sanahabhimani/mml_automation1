@@ -39,6 +39,7 @@ def enable_axes(controller, cq, z_axes):
 
     cq.resume()
     cq.wait_for_empty()
+    controller.runtime.commands.end_command_queue(cq)
 
 
 def prepare_zaxes(controller, cq, z_axes, spindle_ports, flood_ports, active_z,
