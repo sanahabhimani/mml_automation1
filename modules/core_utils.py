@@ -181,6 +181,8 @@ def enable_metrologyprobe(controller, state, output_num=0, axis="X", execution_t
         execution_task_index=execution_task_index,
     )
 
+    time.sleep(1) # pause before querying because of latency 
+
     # Read back the output state
     current = controller.runtime.commands.io.digitaloutputget(
         axis=axis,
