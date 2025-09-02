@@ -31,7 +31,12 @@ master_path = base_path / mastername
 
 cu._check_lockfile(base_path)
 
+######################################################################################################################################
+
 ## STEP B: Initial Motions, Digital Output (DO) --- Turn Spindle/Flood Cooling On
+controller = a1.Controller.connect()
+controller.start()
+print("Is controller running?", controller.is_running)
 
 # First Command Queue Begins Here:
 # start a queue with capacity 64, and block if full
@@ -59,6 +64,7 @@ cq.wait_for_empty()
 print("Ending command queue in task window after doing initial setup of positions and turning spindle and flood cooling on.")
 controller.runtime.commands.end_command_queue(cq)
 
+########################################################################################################################################
 ## Check ZC Drive Status (can turn into a function)
 
 
@@ -142,3 +148,84 @@ with open(cam_path, "r") as f:
         follower_values.append(follower)
 
 
+## and then it does the movement
+####### initiate advanced motion module ############
+am = cq.commands.advanced_motion
+# free table 1 in case something is already loaded
+am.cammingfreetable(1) # table_num = 1
+am.cammingloadtablefromarray(
+    table_num=1,
+    leader_values=leader_values,
+    follower_values=follower_values,
+    num_values=len(leader_values),
+    units_mode=a1.CammingUnits.Primary,               # follower is position vs leader
+    interpolation_mode=a1.CammingInterpolation.Linear, # typical for .Cam
+    wrap_mode=a1.CammingWrapping.NoWrap,               # NOWRAP
+    table_offset=0.0,
+#    execution_task_index=1
+)
+#print("[step D] Camming table 1 loaded.")
+
+# slow, safe test speeds
+SPEED_Y_TRAVERSE  = 20.0   # mm/s
+SPEED_X_TRAVERSE  = 15.0   # mm/s
+SPEED_ZC_APPROACH = 2.0   # mm/s  (down to zstart+2)
+SPEED_ZC_TOUCH    = 0.5   # mm/s  (final settle at zstart)
+
+# move y to start position, wait for in position
+cq.commands.motion.moveabsolute(["Y"], [ystart], [SPEED_Y_TRAVERSE])
+cq.commands.motion.waitforinposition(["Y"])
+print("queued Y→ystart + wait.")
+
+## move X start (known here as xvalue)
+cq.commands.motion.moveabsolute(["X"], [xvalue], [SPEED_X_TRAVERSE])
+print("[D-Q4] queued X→xvalue.")
+
+
+
+cq.commands.advanced_motion.cammingon(
+    follower_axis="ZC",
+    leader_axis="Y",
+    table_num=1,
+    source=a1.CammingSource.PositionCommand,                    # leader uses position
+    output=a1.CammingOutput.RelativePosition  # matches CAMSYNC ...,1
+)
+print("[D-Q6] queued camming ON (ZC follows Y, relative).")
+
+
+### this should now check if the camming bit is true:
+
+cfg = a1.StatusItemConfiguration()
+cfg.axis.add(a1.AxisStatusItem.AxisStatus,        "ZC")  # bitfield we need
+cfg.axis.add(a1.AxisStatusItem.ProgramPosition,   "ZC")  # optional: handy context
+
+results = controller.runtime.status.get_status_items(cfg)
+
+
+# Pull raw values (note the .value, same as the doc’s .Value)
+axis_status_item = results.axis.get(a1.AxisStatusItem.AxisStatus, "ZC")
+progpos_item     = results.axis.get(a1.AxisStatusItem.ProgramPosition, "ZC")
+
+axis_status = int(axis_status_item.value)   # bitfield
+zc_progpos  = float(progpos_item.value)     # mm (primary user units)
+
+CAMMING_MASK = 1 << 16  # AeroBasic INDEXTOMASK(16) == 65536
+is_camming   = bool(axis_status & CAMMING_MASK)
+
+print(f"[diag] ZC AxisStatus = 0x{axis_status:08X}")
+print(f"[diag] ZC camming bit set? {'Yes' if is_camming else 'No'}")
+print(f"[diag] ZC ProgramPosition = {zc_progpos:.4f}")
+
+controller.runtime.commands.end_command_queue(cq)
+
+## then start up the spindles using the prepare zaxes function which requires digital output set commands
+
+### then start up command queue session again
+cq.commands.motion.moveabsolute(["Y"], [y_target], [SPEED_Y_TEST]) #this should change in Z as well
+
+
+## also need to make the cut camming bit turn off so we need to turn the camsync off cus then it needs to do the cut camming for the next 
+## cut camming file
+
+## that's one cut camming file 
+## now we need to loop it over the next one
