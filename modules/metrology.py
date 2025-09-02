@@ -561,3 +561,57 @@ def plane_metrology(
 
 def _within(v, target, tol=1e-3):
     return abs(v - target) <= tol
+
+
+def enable_metrologyprobe(controller, state, output_num=0, axis="X", execution_task_index=1):
+    """
+    Enable or disable the metrology probe, then confirm state.
+
+    Parameters
+    ----------
+    controller : object
+        Automation1 controller instance.
+    state : str
+        Either "on" or "off".
+    output_num : int
+        Digital IO output port where the probe is connected. Default 0.
+    axis : str
+        Axis name (e.g., "X"). Default "X".
+    execution_task_index : int
+        The Task window in the Automation1 software suite to execute the command.
+    """
+
+    state = state.lower()
+    if state == "on":
+        value = 1
+    elif state == "off":
+        value = 0
+    else:
+        raise ValueError("state must be 'on' or 'off'")
+
+    # Set the output
+    controller.runtime.commands.io.digitaloutputset(
+        axis=axis,
+        output_num=output_num,
+        value=value,
+        execution_task_index=execution_task_index,
+    )
+
+    time.sleep(1) # pause before querying because of latency 
+
+    # Read back the output state
+    current = controller.runtime.commands.io.digitaloutputget(
+        axis=axis,
+        output_num=output_num,
+        execution_task_index=execution_task_index,
+    )
+
+    # Build human-readable status
+    if int(current) == 1:
+        status = "Metrology probe is ON"
+    elif int(current) == 0:
+        status = "Metrology probe is OFF"
+    else:
+        status = "Metrology probe in awkward state. Stop and check hardware."
+
+    return status
