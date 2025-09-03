@@ -7,6 +7,8 @@ import os
 import serial
 from pathlib import Path
 from pprint import pprint
+import pandas as pd
+import re
 
 import sys
 sys.path.append('C:\\Users\\UNIVERSITY\\git\\')
@@ -112,8 +114,7 @@ def prepare_zaxes(controller, cq, z_axes, spindle_ports, flood_ports, active_z,
 
 
 
-
-def check_axis_drive_position(controller, axis):
+def check_axis_status_position(controller, axis):
     """
     Check drive status and program position for a given axis.
     
@@ -125,81 +126,238 @@ def check_axis_drive_position(controller, axis):
         Axis name (e.g., "ZA", "ZB", "ZC").
     """
     cfg = a1.StatusItemConfiguration()
-    cfg.axis.add(a1.AxisStatusItem.DriveStatus, axis)
+    cfg.axis.add(a1.AxisStatusItem.AxisStatus, axis)
     cfg.axis.add(a1.AxisStatusItem.ProgramPosition, axis)
 
     results = controller.runtime.status.get_status_items(cfg)
 
     # Extract values
-    drive_status = results.axis.get(a1.AxisStatusItem.DriveStatus, axis).value
+    axis_status = results.axis.get(a1.AxisStatusItem.AxisStatus, axis).value
     program_pos  = results.axis.get(a1.AxisStatusItem.ProgramPosition, axis).value
 
     # Convert drive status to int and mask off camming bit (bit 16)
-    camming_bit = int(drive_status) & (1 << 16)
-
-    print(f"[diag] {axis} camming bit set? {'Yes' if camming_bit else 'No'}")
-    print(f"[diag] {axis} ProgramPosition = {program_pos:.4f} mm")
+    camming_bit = int(axis_status) & (1 << 16)
 
     return {
         "axis": axis,
         "camming_bit": bool(camming_bit),
         "program_position": program_pos,
-        "drive_status_raw": int(drive_status)
+        "axis_status_raw": int(axis_status)
     }
 
+def read_starting_coords(master_path, camnum):
+    df = load_master_table(master_path)
 
-def enable_metrologyprobe(controller, state, output_num=0, axis="X", execution_task_index=1):
+    # make sure camnum is a string with leading zeros like in the file
+    camnum_str = str(camnum).zfill(4)
+
+    # filter rows where column 0 == camnum_str
+    row = df[df[0] == camnum_str]
+
+    if row.empty:
+        raise ValueError(f"camnum {camnum_str} not found in {master_path}")
+
+    # extract x, y, z as scalars
+    xstart = row.iloc[0, 1]
+    ystart = row.iloc[0, 2]
+    zstart = row.iloc[0, 3]
+
+    return xstart, ystart, zstart
+    
+
+def load_master_table(master_path):
     """
-    Enable or disable the metrology probe, then confirm state.
-
-    Parameters
-    ----------
-    controller : object
-        Automation1 controller instance.
-    state : str
-        Either "on" or "off".
-    output_num : int
-        Digital IO output port where the probe is connected. Default 0.
-    axis : str
-        Axis name (e.g., "X"). Default "X".
-    execution_task_index : int
-        The Task window in the Automation1 software suite to execute the command.
+    Read Master.txt (or .dat) as whitespace-delimited without headers.
+    Keeps column 0 as string so leading zeros aren't lost.
+    Returns a DataFrame with columns:
+      0 = camnum_str, 1 = X, 2 = Y, 3 = Z, 4 = feed (if present)
     """
+    master_path = Path(master_path)
+    assert master_path.exists(), f"Master file not found: {master_path}"
 
-    state = state.lower()
-    if state == "on":
-        value = 1
-    elif state == "off":
-        value = 0
-    else:
-        raise ValueError("state must be 'on' or 'off'")
-
-    # Set the output
-    controller.runtime.commands.io.digitaloutputset(
-        axis=axis,
-        output_num=output_num,
-        value=value,
-        execution_task_index=execution_task_index,
+    # comment='#' lets you keep notes in the file safely
+    df = pd.read_csv(
+        master_path,
+        sep='\s+',
+        header=None,
+        comment="#",
+        dtype={0: str},      # preserve '0007'
+        engine="python",
     )
+    # Drop empty rows if any slipped through
+    df = df.dropna(how="all")
+    
+    return df
 
-    time.sleep(1) # pause before querying because of latency 
 
-    # Read back the output state
-    current = controller.runtime.commands.io.digitaloutputget(
-        axis=axis,
-        output_num=output_num,
-        execution_task_index=execution_task_index,
-    )
+def iter_cam_paths_from_master(master_path, base_path, cuttype):
+    """
+    Yields (row_idx, camnum_int, cam_filename, cam_path, row) for each row in Master.txt.
+    - camnum_int is the integer form for formatting (7 → '0007')
+    - row is the entire pandas row if you want X/Y/Z/feed later
+    """
+    base_path = Path(base_path)
+    df = load_master_table(master_path)
+    campaths = []
+    for i, row in df.iterrows():
+        camnum_str = str(row[0]).strip()
 
-    # Build human-readable status
-    if int(current) == 1:
-        status = "Metrology probe is ON"
-    elif int(current) == 0:
-        status = "Metrology probe is OFF"
-    else:
-        status = "Metrology probe in awkward state. Stop and check hardware."
+        # Be forgiving: extract digits just in case (e.g., '0007' or '0007,' etc.)
+        m = re.search(r"(\d+)", camnum_str)
+        if not m:
+            print(f"[warn] row {i}: could not parse cam number from '{camnum_str}'")
+            continue
 
-    return status
+        camnum_int = int(m.group(1))  # 7, 12, etc.
+        cam_filename = f"CutCam{cuttype}{camnum_int:04d}.Cam"
+        cam_path = base_path / cam_filename
+        campaths.append(cam_path)
+
+        if not cam_path.exists():
+            print(f"[warn] row {i}: missing {cam_path}")
+            continue
+
+    return campaths# i, camnum_int, cam_filename, cam_path, row
+
+def loadcampath(master_path, base_path, cuttype, camnum):
+    """
+    Yields (row_idx, camnum_int, cam_filename, cam_path, row) for each row in Master.txt.
+    - camnum_int is the integer form for formatting (7 → '0007')
+    - row is the entire pandas row if you want X/Y/Z/feed later
+    """
+    base_path = Path(base_path)
+    df = load_master_table(master_path)
+    campaths = []
+    for i, row in df.iterrows():
+        camnum_str = str(row[0]).strip()
+
+        # Be forgiving: extract digits just in case (e.g., '0007' or '0007,' etc.)
+        m = re.search(r"(\d+)", camnum_str)
+        if not m:
+            print(f"[warn] row {i}: could not parse cam number from '{camnum_str}'")
+            continue
+
+        camnum_int = int(m.group(1))  # 7, 12, etc.
+        cam_filename = f"CutCam{cuttype}{camnum_int:04d}.Cam"
+        cam_path = base_path / cam_filename
+        campaths.append(cam_path)
+
+        if not cam_path.exists():
+            print(f"[warn] row {i}: missing {cam_path}")
+            continue
+
+    return campaths# i, camnum_int, cam_filename, cam_path, row
+
+
+def get_cutcam_coords(campath):
+    """
+    """
+    leader_values = []
+    follower_values = []
+    
+    with open(campath, "r") as f:
+        for ln in f:
+            s = ln.strip()
+            parts = s.replace(",", " ").split()
+            if len(parts) < 2:
+                continue
+            try:
+                leader = float(parts[1]) # was 0 
+                follower = float(parts[2]) # was 1
+            except ValueError:
+                print(f"[warn] Skipping non-numeric line: {s}")
+                continue
+            leader_values.append(leader)
+            follower_values.append(follower)
+        
+            
+    return leader_values, follower_values
+
+
+
+def cutcamming(controller, cq, path, zaxis, cuttype, safelift, feedspeed):
+    path = Path(path)
+    assert path.exists(), f"Base path not found: {path}"
+    mastername = "Master.txt"
+    masterpath = Path(path) / mastername   # ensure it's a Path
+
+    assert masterpath.exists(), f"Master file not found: {masterpath}"
+
+    cu._check_lockfile(path)
+
+    # i feel like cutcamming needs to be one function that just focuses on the one campath and we loop over it?
+    campaths = iter_cam_paths_from_master(master_path, base_path, cuttype)
+    for campath in campaths[0:1]:
+        assert campath.exists(), f"Campath not found: {campath}"
+        #print(campath)
+        yvals, zvals = get_cutcam_coords(campath)
+        
+        #print(len(yvals), len(zvals))
+        
+        # now set up motion
+        am = cq.commands.advanced_motion
+        am.cammingfreetable(1) # clear table 1 in case something is loaded in that table
+        am.cammingloadtablefromarray(
+            table_num=1,
+            leader_values=leader_values,
+            follower_values=follower_values,
+            num_values=len(leader_values),
+            units_mode=a1.CammingUnits.Primary,               # follower is position vs leader
+            interpolation_mode=a1.CammingInterpolation.Linear, # typical for .Cam
+            wrap_mode=a1.CammingWrapping.NoWrap,               # NOWRAP
+            table_offset=0.0)
+        print('Camming table loaded')
+
+        camnum = Path(campath).stem[-4:]
+        xstart, ystart, zstart = read_starting_coords(master_path=master_path, camnum=camnum)
+
+        # slow, safe test speeds
+        SPEED_Y_TRAVERSE  = 20.0   # mm/s
+        SPEED_X_TRAVERSE  = 20.0   # mm/s
+        SPEED_ZC_APPROACH = 4.0   # mm/s  (down to zstart+2)
+        SPEED_ZC_TOUCH    = 0.1   # mm/s  (final settle at zstart)
+        
+        
+        
+        # move y to start position, wait for in position
+        cq.commands.motion.moveabsolute(["X", "Y"], [xstart, ystart], [SPEED_Y_TRAVERSE,  SPEED_X_TRAVERSE])
+        cq.commands.motion.waitforinposition(["Y"])
+        cq.commands.motion.waitforinposition(["X"])
+        cq.commands.motion.movedelay(["X", "Y"], delay_time=1_000)
+
+        cq.commands.motion.moveabsolute(["ZC"], [zstart + 2.0], [SPEED_ZC_APPROACH])
+        cq.commands.motion.waitforinposition(["ZC"])
+        cq.commands.motion.moveabsolute(["ZC"], [zstart], [SPEED_ZC_TOUCH])
+        cq.commands.motion.waitforinposition(["ZC"])
+        cq.commands.motion.waitformotiondone(["ZC"])
+        
+        
+        while True:
+            statuses = check_axis_status_position(controller=controller, axis='ZC')
+            if statuses['camming_bit'] is False:
+                break # in desired state, stop looping
+            time.sleep(0.1)  
+
+        ### here is where it yells at me 
+        cq.commands.advanced_motion.cammingon(
+            follower_axis=zaxis,
+            leader_axis="Y",
+            table_num=1,
+            source=a1.CammingSource.PositionCommand,                    # leader uses position
+            output=a1.CammingOutput.RelativePosition  # matches CAMSYNC ...,1
+        )
+
+        ### here is where it yells at me because ZC was still moving down but this just looped through it so damn fast
+        ### there's gotta be something else we can do with the waitforinposition and wait for move done
+        ## something about InPositionTime value that we might be able to toggle
+        while True:
+            statuses = check_axis_status_position(controller=controller, axis='ZC')
+            if statuses['camming_bit'] is True:
+                break # in desired state, stop looping
+            time.sleep(0.1)  
+        controller.runtime.commands.end_command_queue(cq)
+        #assert statuses['camming_bit'] == True, f"Camming bit not set to True, but {zaxis} camming was just commanded to be on."
+    
 
 # TODO: Each cam file step: loads --> syncs to camming bit to turn camming state on --> unsyncs after cam file final point 
 # --> frees the camming table --> then next camming file which is also known as the next row in the Master.txt file and starts again
