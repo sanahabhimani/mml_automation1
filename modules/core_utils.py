@@ -17,6 +17,46 @@ import metalens
 import core_utils as cu 
 
 
+def check_io_status(controller, port, name, axis='X', execution_task_index=1):
+    """
+    Check the status of a digital output (flood cooling, spindle cooling, probe, etc.)
+    
+    Parameters
+    ----------
+    controller : object
+        Automation1 controller instance.
+    port : int
+        Digital IO output port number.
+    name : str, optional
+        Human-readable device name for output string (default="Device").
+    axis : str
+        Axis associated with the digital output. Default is  "X"
+    execution_task_index : int, optional
+        Task index to query (default=1).
+    
+    Returns
+    -------
+    str
+        Status message of the given device.
+    """
+    # Query output state
+    current = controller.runtime.commands.io.digitaloutputget(
+        axis=axis,
+        output_num=port,
+        execution_task_index=execution_task_index,
+    )
+
+    # Build status message
+    if int(current) == 1:
+        status = f"{name} is ON"
+    elif int(current) == 0:
+        status = f"{name} is OFF"
+    else:
+        status = f"{name} in awkward state. Stop and check hardware."
+
+    return status
+
+
 def enable_axes(controller, cq, z_axes):
     """
     Enable X, Y, and one or more Z axes.
