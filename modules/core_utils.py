@@ -57,7 +57,7 @@ def check_io_status(controller, port, name, axis='X', execution_task_index=1):
     return status
 
 
-def enable_axes(controller, cq, z_axes):
+def enable_zaxes(controller, cq, z_axes):
     """
     Enable X, Y, and one or more Z axes.
 
@@ -124,14 +124,14 @@ def prepare_zaxes(controller, cq, z_axes, spindle_ports, flood_ports, active_z,
     cq.commands.motion.waitforinposition(z_axes)
     cq.resume()
     cq.wait_for_empty()
-
-    print(f"Moved {', '.join(z_axes)} to {z_position:.4f} mm. Resetting flood cooling, turning on spindles, and enabling flood for {active_z}.")
+    # TODO: should actually query the position of the z axis and have it print that instead
+    print(f"Moved {', '.join(z_axes)} to {z_position:.4f} mm. Resetting flood cooling, turning on spindles, and enabling flood for active Z axis, {active_z}.")
     cq.pause()
 
     # --- Flood OFF for all ---
     for fp in flood_ports:
-        cq.commands.motion.movedelay(z_axes, delay_time=11_000)
         cq.commands.io.digitaloutputset(axis=io_axis, output_num=fp, value=0)
+        cq.commands.motion.movedelay(z_axes, delay_time=3_000)
 
     # --- Spindles ON for all ---
     for sp in spindle_ports:
@@ -139,8 +139,6 @@ def prepare_zaxes(controller, cq, z_axes, spindle_ports, flood_ports, active_z,
 
     # --- Flood ON only for active Z ---
     active_index = z_axes.index(active_z)
-    time.sleep(5)
-    cq.commands.motion.movedelay(z_axes, delay_time=11_000)
     cq.commands.io.digitaloutputset(axis=io_axis, output_num=flood_ports[active_index], value=1)
 
     # --- Hold dwell ---
@@ -148,10 +146,17 @@ def prepare_zaxes(controller, cq, z_axes, spindle_ports, flood_ports, active_z,
     cq.resume()
     cq.wait_for_empty()
 
-    print(f"All spindles ON {spindle_ports}; flood ON for {active_z} (DO {flood_ports[active_index]}).")
+    #print(f"All spindles ON {spindle_ports}; flood ON for {active_z} (DO {flood_ports[active_index]}).")
     controller.runtime.commands.end_command_queue(cq)
     print("Command queue ended after prepping Z axes.")
-
+    for fp in flood_ports:
+        name = f"Flood cooling port {fp}"
+        status = check_io_status(controller=controller, port=fp, name=name, axis='X', execution_task_index=1)
+        print(status)
+    for sp in spindle_ports:
+        name = f'Spindle port {sp}'
+        status = check_io_status(controller=controller, port=sp, name=name, axis='X', execution_task_index=1)
+        print(status)
 
 
 def check_axis_status_position(controller, axis):
@@ -185,7 +190,7 @@ def check_axis_status_position(controller, axis):
         "axis_status_raw": int(axis_status)
     }
 
-def read_starting_coords(master_path, camnum):
+def read_startend_coords(master_path, camnum):
     df = load_master_table(master_path)
 
     # make sure camnum is a string with leading zeros like in the file
@@ -201,8 +206,9 @@ def read_starting_coords(master_path, camnum):
     xstart = row.iloc[0, 1]
     ystart = row.iloc[0, 2]
     zstart = row.iloc[0, 3]
+    yend = row.iloc[0, 4]
 
-    return xstart, ystart, zstart
+    return xstart, ystart, zstart, yend
     
 
 def load_master_table(master_path):
@@ -315,90 +321,210 @@ def get_cutcam_coords(campath):
 
 
 
-def cutcamming(controller, cq, path, zaxis, cuttype, safelift, feedspeed):
+def cutalumina(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
+               testtouchpath, wearshiftpath, lines_per_test):
     path = Path(path)
     assert path.exists(), f"Base path not found: {path}"
-    mastername = "Master.txt"
-    masterpath = Path(path) / mastername   # ensure it's a Path
 
+    mastername = "Master.txt"
+    masterpath = Path(path) / mastername  
     assert masterpath.exists(), f"Master file not found: {masterpath}"
 
-    cu._check_lockfile(path)
+    # Load wear shift table
+    ws_table = load_wear_shift_table(wearshiftpath)
 
-    # i feel like cutcamming needs to be one function that just focuses on the one campath and we loop over it?
-    campaths = iter_cam_paths_from_master(master_path, base_path, cuttype)
-    for campath in campaths[0:1]:
+    cu._check_lockfile(path)
+    campaths = iter_cam_paths_from_master(master_path=masterpath, base_path=path, cuttype=cuttype)
+    
+    am = cq.commands.advanced_motion
+    for campath in campaths[0:4]:
         assert campath.exists(), f"Campath not found: {campath}"
-        #print(campath)
+        
+        camnum = Path(campath).stem[-4:]
+        camnum_int = int(camnum)
+        wearshift = ws_table.get(camnum_int, 0.0)
+
+        # get coordinates, including original non-wear shifted z coordinate
         yvals, zvals = get_cutcam_coords(campath)
+        xstart, ystart, zstart_raw, yend = read_startend_coords(master_path=masterpath, camnum=camnum)
         
-        #print(len(yvals), len(zvals))
-        
-        # now set up motion
-        am = cq.commands.advanced_motion
-        am.cammingfreetable(1) # clear table 1 in case something is loaded in that table
+        # apply wear-shift to camming z-values and zstart value
+        zvals_shifted = [z + wearshift for z in zvals]
+        zstart = zstart_raw + wearshift
+        print(zstart)
+
+    
+        # now set up aerotech camming conditions
+        am.cammingfreetable(1) 
         am.cammingloadtablefromarray(
             table_num=1,
-            leader_values=leader_values,
-            follower_values=follower_values,
-            num_values=len(leader_values),
-            units_mode=a1.CammingUnits.Primary,               # follower is position vs leader
-            interpolation_mode=a1.CammingInterpolation.Linear, # typical for .Cam
-            wrap_mode=a1.CammingWrapping.NoWrap,               # NOWRAP
+            leader_values=yvals,
+            follower_values=zvals_shifted,
+            num_values=len(yvals),
+            units_mode=a1.CammingUnits.Primary,               
+            interpolation_mode=a1.CammingInterpolation.Linear, 
+            wrap_mode=a1.CammingWrapping.NoWrap,               
             table_offset=0.0)
-        print('Camming table loaded')
-
-        camnum = Path(campath).stem[-4:]
-        xstart, ystart, zstart = read_starting_coords(master_path=master_path, camnum=camnum)
-
-        # slow, safe test speeds
-        SPEED_Y_TRAVERSE  = 20.0   # mm/s
-        SPEED_X_TRAVERSE  = 20.0   # mm/s
-        SPEED_ZC_APPROACH = 4.0   # mm/s  (down to zstart+2)
-        SPEED_ZC_TOUCH    = 0.1   # mm/s  (final settle at zstart)
+        print(f'Camming table loaded for {camnum} file with wear shift = {wearshift}')
         
+        SPEED_Y  = 20.0  # mm/s
+        SPEED_X  = 20.0   
+        SPEED_Z = 12.0  # (down to zstart+2)
+        # TODO: PRIORITY 1 --- check if we want ZC touch speed to be slower
+        SPEED_Z_TOUCH    = 0.1  # (final settle at zstart)
         
-        
-        # move y to start position, wait for in position
-        cq.commands.motion.moveabsolute(["X", "Y"], [xstart, ystart], [SPEED_Y_TRAVERSE,  SPEED_X_TRAVERSE])
+        # move to start positions, wait for in position
+        cq.commands.motion.moveabsolute(["X", "Y"], [xstart, ystart], [SPEED_Y,  SPEED_X])
         cq.commands.motion.waitforinposition(["Y"])
         cq.commands.motion.waitforinposition(["X"])
-        cq.commands.motion.movedelay(["X", "Y"], delay_time=1_000)
+        cq.commands.motion.movedelay(["X", "Y"], delay_time=1_500)
 
-        cq.commands.motion.moveabsolute(["ZC"], [zstart + 2.0], [SPEED_ZC_APPROACH])
-        cq.commands.motion.waitforinposition(["ZC"])
-        cq.commands.motion.moveabsolute(["ZC"], [zstart], [SPEED_ZC_TOUCH])
-        cq.commands.motion.waitforinposition(["ZC"])
-        cq.commands.motion.waitformotiondone(["ZC"])
+        cq.commands.motion.moveabsolute([zaxis], [zstart + 2.0], [SPEED_Z])
+        cq.commands.motion.waitforinposition([zaxis])
+        cq.commands.motion.moveabsolute([zaxis], [zstart+1], [0.5])
+        cq.commands.motion.waitforinposition([zaxis])
+        cq.commands.motion.waitformotiondone([zaxis])
         
+        cq.commands.motion.moveabsolute([zaxis], [zstart+0.5], [0.1])
+        cq.commands.motion.waitforinposition([zaxis])
+        cq.commands.motion.waitformotiondone([zaxis])
+        
+        cq.commands.motion.moveabsolute([zaxis], [zstart], [0.01])
+        cq.commands.motion.waitforinposition([zaxis])
+        cq.commands.motion.waitformotiondone([zaxis])
+        
+        cq.commands.motion.movedelay([zaxis], delay_time=1_000)
         
         while True:
-            statuses = check_axis_status_position(controller=controller, axis='ZC')
+            statuses = check_axis_status_position(controller=controller, axis=zaxis)
             if statuses['camming_bit'] is False:
                 break # in desired state, stop looping
             time.sleep(0.1)  
 
-        ### here is where it yells at me 
         cq.commands.advanced_motion.cammingon(
             follower_axis=zaxis,
             leader_axis="Y",
             table_num=1,
-            source=a1.CammingSource.PositionCommand,                    # leader uses position
-            output=a1.CammingOutput.RelativePosition  # matches CAMSYNC ...,1
+            source=a1.CammingSource.PositionCommand,  # leader uses position
+            output=a1.CammingOutput.RelativePosition  
         )
 
-        ### here is where it yells at me because ZC was still moving down but this just looped through it so damn fast
-        ### there's gotta be something else we can do with the waitforinposition and wait for move done
-        ## something about InPositionTime value that we might be able to toggle
+        ## TODO: there's gotta be something else we can do with the waitforinposition and wait for move done
+        ## TODO: something about InPositionTime value that we might be able to toggle
         while True:
-            statuses = check_axis_status_position(controller=controller, axis='ZC')
+            statuses = check_axis_status_position(controller=controller, axis=zaxis)
             if statuses['camming_bit'] is True:
+                print(f"{zaxis} camming bit is True; ready to cut line {camnum}")
                 break # in desired state, stop looping
             time.sleep(0.1)  
-        controller.runtime.commands.end_command_queue(cq)
-        #assert statuses['camming_bit'] == True, f"Camming bit not set to True, but {zaxis} camming was just commanded to be on."
+
+        # TODO: PRIORITY 1, DOES FEEDSPEED NEED TO SPEED UP A LITTLE BIT FURTHER INTO THE Y CUT??
+        cq.commands.motion.moveabsolute(["Y"], [yend], [feedspeed])
+        cq.commands.motion.waitforinposition(["Y"])
+        cq.commands.motion.waitformotiondone(["Y"])
+        cq.commands.motion.movedelay(["Y"], delay_time=2_000)
+
+        am.cammingoff(follower_axis=zaxis) 
+
+        # check that camming bit status is False
+        while True:
+            statuses = check_axis_status_position(controller=controller, axis=zaxis)
+            if statuses['camming_bit'] is False:
+                print(f"{zaxis} camming status is off, {camnum} line finished cutting.")
+                break # in desired state, stop looping
+            time.sleep(0.1)  
+        
+        # retract ZC and free table 1
+        # TODO: PRIORITY 1-- CHECK IF THIS IS THE ONLY PLACE THAT SAFELIFT IS USED IN SOURCE CODE
+        cq.commands.motion.moveabsolute([zaxis], [zstart + safelift], [SPEED_Z])
+        cq.commands.motion.waitforinposition([zaxis])
+        cq.commands.motion.waitformotiondone([zaxis])
+        cq.commands.advanced_motion.cammingfreetable(1)
+        cq.commands.motion.movedelay([zaxis], delay_time=2_000)
+
+        # drain the queue before we are ready to cut the next line
+        cq.wait_for_empty()
+
+
+        if (camnum_int + 1) % lines_per_test == 0:
+            info = run_alumina_test_touch(
+                controller = controller,
+                cq=cq,
+                camnum=camnum,
+                testtouchpath = testtouchpath,
+                wearshiftpath=wearshiftpath,
+                zaxis=zaxis,
+                lines_per_test=lines_per_test,
+            )
+            print(f"did test touch #{info['test_touch_index']}", info)
+
+        
+    cq.commands.motion.moveabsolute([zaxis], [0.0], [15])
+    controller.runtime.commands.end_command_queue(cq)
+
+
+def run_alumina_test_touch(
+    controller,
+    cq,
+    camnum,
+    testtouchpath,
+    wearshiftpath,
+    zaxis,
+    lines_per_test,
+):
+    camnum = int(camnum)
+
+    tt_table = load_test_touch_table(testtouchpath)
+    ws_table = load_wear_shift_table(wearshiftpath)
+
+    tt_index = camnum // lines_per_test
+    print('tt index', tt_index)
+    if tt_index not in tt_table:
+        raise KeyError(f"Test-touch index {tt_index} not found in {test_touch_file}")
+
+    ttx, tty, ttz = tt_table[tt_index]
+    wear_shift = ws_table.get(camnum, 0.0)
+    z_touch = ttz + wear_shift
+
+    # XY
+    cq.commands.motion.moveabsolute(["X", "Y"], [ttx, tty], [20, 20])
+    cq.commands.motion.waitforinposition(["X"])
+    cq.commands.motion.waitforinposition(["Y"])
+    cq.commands.motion.movedelay(["X", "Y"], delay_time = 1_000)
+
+    # Z to z_touch + 2 @ z_approach_speed
+    cq.commands.motion.moveabsolute([zaxis], [z_touch + 2.0], [10])
+    cq.commands.motion.waitforinposition([zaxis])
+
+    # Z to z_touch + 1 @ z_slow_speed
+    cq.commands.motion.moveabsolute([zaxis], [z_touch + 1.0], [0.5])
+    cq.commands.motion.waitforinposition([zaxis])
+
+    # Z to z_touch @ z_final_speed
+    cq.commands.motion.moveabsolute([zaxis], [z_touch+0.5], [0.05])
+    cq.commands.motion.waitforinposition([zaxis])
     
+    cq.commands.motion.moveabsolute([zaxis], [z_touch], [0.01])
+    cq.commands.motion.waitforinposition([zaxis])
 
-# TODO: Each cam file step: loads --> syncs to camming bit to turn camming state on --> unsyncs after cam file final point 
-# --> frees the camming table --> then next camming file which is also known as the next row in the Master.txt file and starts again
+    # queue-based hold at depth (ms)
+    cq.commands.motion.movedelay([zaxis], delay_time=500)
 
+    # retract to Z = 0
+    cq.commands.motion.moveabsolute([zaxis], [0.0], [20])
+    cq.commands.motion.waitforinposition([zaxis])
+    cq.commands.motion.movedelay(['ZC'], delay_time=2_000)
+
+    # X out
+    # TODO: UNCOMMENT THIS OUT PRIORITY 1
+    #cq.commands.motion.moveabsolute(["X"], [-270], [20]) 
+    #cq.commands.motion.waitforinposition(["X"])
+
+    return {
+        "camnum": camnum,
+        "test_touch_index": tt_index,
+        "X": ttx, "Y": tty,
+        "Z_test_touch_raw": ttz,
+        "wear_shift": wear_shift,
+        "Z_touch_final": z_touch,
+    }
