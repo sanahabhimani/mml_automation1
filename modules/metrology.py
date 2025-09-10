@@ -172,17 +172,16 @@ def dressing_metrology(
         )
         command_queue.commands.motion.waitformotiondone(["X", "ZA"])
         command_queue.commands.motion.waitforinposition(["X", "ZA"])
-        command_queue.commands.motion.movedelay("ZA", 2_000)
+        command_queue.commands.motion.movedelay("ZA", 500)
         
         for iy in range(numY):
             y = Ystart + incY * iy
-            print(x, y)
             
             # 2) Drop to depth and dwell so we can pause and query data points
-            command_queue.commands.motion.moveabsolute(axes=["Y"], positions=[y], speeds=[3.0])
+            command_queue.commands.motion.moveabsolute(axes=["Y"], positions=[y], speeds=[10.0])
             command_queue.commands.motion.waitforinposition(["Y"])
             command_queue.commands.motion.waitformotiondone(["Y"])
-            command_queue.commands.motion.movedelay("Y", 2_000) # can change to 1s
+            command_queue.commands.motion.movedelay("Y", 250) # can change to 1s
 
             
             command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[depth], speeds=[3.0])
@@ -190,7 +189,7 @@ def dressing_metrology(
             command_queue.commands.motion.waitformotiondone(["ZA"])
             #command_queue.commands.motion.movedelay("ZA", int(dwell_ms_at_depth))
     
-            command_queue.commands.motion.movedelay(["X", "Y", "ZA"], 4_000)
+            command_queue.commands.motion.movedelay(["X", "Y", "ZA"], 250)
             
             ser.write(b"RMD0\r\n")  # replace with your gauge's measurement command if needed
             time.sleep(0.05)
@@ -212,7 +211,7 @@ def dressing_metrology(
             command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[Zstart], speeds=[7.0])
             command_queue.commands.motion.waitformotiondone(["ZA"])
             command_queue.commands.motion.waitforinposition(["ZA"])
-            command_queue.commands.motion.movedelay(["X", "Y"], 3_000)
+            command_queue.commands.motion.movedelay(["X", "Y"], 500)
             command_queue.wait_for_empty()  # ensure retract finished before next X
         
     # Park and end
