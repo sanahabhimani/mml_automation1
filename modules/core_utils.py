@@ -190,6 +190,7 @@ def check_axis_status_position(controller, axis):
         "axis_status_raw": int(axis_status)
     }
 
+
 def read_startend_coords(master_path, camnum):
     df = load_master_table(master_path)
 
@@ -265,6 +266,7 @@ def iter_cam_paths_from_master(master_path, base_path, cuttype):
 
     return campaths# i, camnum_int, cam_filename, cam_path, row
 
+
 def loadcampath(master_path, base_path, cuttype, camnum):
     """
     Yields (row_idx, camnum_int, cam_filename, cam_path, row) for each row in Master.txt.
@@ -320,7 +322,10 @@ def get_cutcam_coords(campath):
     return leader_values, follower_values
 
 
-def cutcamming(controller, cq, path, zaxis, cuttype, safelift, feedspeed):
+def cutcamming(controller, cq, path, zaxis, cuttype, safelift, feedspeed, rot=None):
+    """
+    add docstrings here
+    """
     path = Path(path)
     assert path.exists(), f"Base path not found: {path}"
 
@@ -330,6 +335,12 @@ def cutcamming(controller, cq, path, zaxis, cuttype, safelift, feedspeed):
 
     cu._check_lockfile(path)
     campaths = iter_cam_paths_from_master(master_path=masterpath, base_path=path, cuttype=cuttype)
+
+    if rot:
+        cq.commands.motion.moveabsolute(["U"], [rot], [20])
+        cq.commands.motion.waitforinposition(["U"])
+        cq.commands.motion.waitformotiondone(["U"])
+        cq.commands.motion.movedelay(["U"], delay_time=1_000)
     
     am = cq.commands.advanced_motion
     for campath in campaths:
@@ -433,6 +444,7 @@ def cutcamming(controller, cq, path, zaxis, cuttype, safelift, feedspeed):
     with open(lockfile, "w") as f:
         f.write("")
 
+
 def cutalumina(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
                testtouchpath, wearshiftpath, lines_per_test):
     path = Path(path)
@@ -530,7 +542,11 @@ def cutalumina(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
                 break # in desired state, stop looping
             time.sleep(0.1)  
 
-        # TODO: PRIORITY 1, DOES FEEDSPEED NEED TO SPEED UP A LITTLE BIT FURTHER INTO THE Y CUT??
+        # move at slower feespeed for first 10 mm
+        cq.commands.motion.moveabsolute(["Y"], [ystart+10], [5])
+        cq.commands.motion.waitforinposition(["Y"])
+        cq.commands.motion.waitformotiondone(["Y"])
+        
         cq.commands.motion.moveabsolute(["Y"], [yend], [feedspeed])
         cq.commands.motion.waitforinposition(["Y"])
         cq.commands.motion.waitformotiondone(["Y"])
@@ -646,8 +662,92 @@ def run_alumina_test_touch(
     }
 
 
-def cutlens(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
-               testtouchpath, lines_per_test, zcorr=0):
+def run_test_touch(
+    controller,
+    cq,
+    camnum,
+    testtouchpath,
+    zcorrpath,
+    zaxis,
+    lines_per_test
+):
+    """
+    Lines per test arg tells us how many lines we wanna cut between test touches
+
+    can also add a rotation argument for this function too should we need it
+    default can be rot = None
+
+    This is for running within the cutlens function for when we wanna cut high frequency lenses and are going by batches of 
+    100-200 cuts. Similar to alumina but blade doesn't wear with silicon the same way so we'll put in raw z corrections to make
+    based on these test touches that are run when running the cuts
+    """
+    camnum = int(camnum)
+
+    tt_table = load_test_touch_table(testtouchpath)
+    zcorr_table = load_wear_shift_table(zcorrpath)
+
+    tt_index = camnum // lines_per_test
+    print('tt index', tt_index)
+    if tt_index not in tt_table:
+        raise KeyError(f"Test-touch index {tt_index} not found in {test_touch_file}")
+
+    ttx, tty, ttz = tt_table[tt_index]
+    zcorr = zcorr_table.get(camnum, 0.0)
+    z_touch = ttz + zcorr
+
+    # XY
+    cq.commands.motion.moveabsolute(["X", "Y"], [ttx, tty], [20, 20])
+    cq.commands.motion.waitforinposition(["X"])
+    cq.commands.motion.waitforinposition(["Y"])
+    cq.commands.motion.movedelay(["X", "Y"], delay_time = 1_000)
+
+    # Z to z_touch + 2 @ z_approach_speed
+    cq.commands.motion.moveabsolute([zaxis], [z_touch + 2.0], [10])
+    cq.commands.motion.waitforinposition([zaxis])
+
+    # Z to z_touch + 1 @ z_slow_speed
+    cq.commands.motion.moveabsolute([zaxis], [z_touch + 1.0], [0.5])
+    cq.commands.motion.waitforinposition([zaxis])
+
+    # Z to z_touch @ z_final_speed
+    cq.commands.motion.moveabsolute([zaxis], [z_touch+0.5], [0.05])
+    cq.commands.motion.waitforinposition([zaxis])
+    
+    cq.commands.motion.moveabsolute([zaxis], [z_touch], [0.01])
+    cq.commands.motion.waitforinposition([zaxis])
+
+    # queue-based hold at depth (ms)
+    cq.commands.motion.movedelay([zaxis], delay_time=500)
+
+    # retract to Z = 0
+    cq.commands.motion.moveabsolute([zaxis], [0.0], [20])
+    cq.commands.motion.waitforinposition([zaxis])
+    cq.commands.motion.movedelay(['ZC'], delay_time=1_000)
+
+    # X out
+    cq.commands.motion.moveabsolute(["X"], [-275], [30]) 
+    cq.commands.motion.waitforinposition(["X"])
+
+    return {
+        "camnum": camnum,
+        "test_touch_index": tt_index,
+        "X": ttx, "Y": tty,
+        "Z_test_touch_raw": ttz,
+        "wear_shift": wear_shift,
+        "Z_touch_final": z_touch,
+    }
+
+
+def cutlens_segments(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
+               testtouchpath, zcorrpath, lines_per_test):
+    """
+    Cut lens segment mimic the cut alumina but instead of a wearshift file path it's given 
+    a zcorrection file path 
+
+    Ultimately, this function won't be necessary if we're generating wearshift files that 
+    are just 1 value all the way down the line if we're using the same code that generates wear
+    shift files and just stating that the blade wear is 0
+    """
     path = Path(path)
     assert path.exists(), f"Base path not found: {path}"
 
@@ -655,8 +755,8 @@ def cutlens(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
     masterpath = Path(path) / mastername  
     assert masterpath.exists(), f"Master file not found: {masterpath}"
 
-    # Load wear shift table
-    ws_table = load_wear_shift_table(wearshiftpath)
+    # Load zcorr table
+    zcorr_table = load_wear_shift_table(zcorrpath)
 
     cu._check_lockfile(path)
     campaths = iter_cam_paths_from_master(master_path=masterpath, base_path=path, cuttype=cuttype)
@@ -667,17 +767,17 @@ def cutlens(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
         
         camnum = Path(campath).stem[-4:]
         camnum_int = int(camnum)
+        zcorr = zcorr_table.get(camnum_int, 0.0)
 
         # get coordinates, including original non-wear shifted z coordinate
         yvals, zvals = get_cutcam_coords(campath)
         xstart, ystart, zstart_raw, yend = read_startend_coords(master_path=masterpath, camnum=camnum)
         
-        # apply zcorr to camming z-values and zstart value
+        # apply wear-shift to camming z-values and zstart value
         zvals_shifted = [z + zcorr for z in zvals]
         zstart = zstart_raw + zcorr
         print(zstart)
 
-    
         # now set up aerotech camming conditions
         am.cammingfreetable(1) 
         am.cammingloadtablefromarray(
@@ -701,7 +801,7 @@ def cutlens(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
         cq.commands.motion.moveabsolute(["X", "Y"], [xstart, ystart], [SPEED_Y,  SPEED_X])
         cq.commands.motion.waitforinposition(["Y"])
         cq.commands.motion.waitforinposition(["X"])
-        cq.commands.motion.movedelay(["X", "Y"], delay_time=1_000)
+        cq.commands.motion.movedelay(["X", "Y"], delay_time=1_500)
 
         cq.commands.motion.moveabsolute([zaxis], [zstart + 2.0], [SPEED_Z])
         cq.commands.motion.waitforinposition([zaxis])
@@ -742,11 +842,11 @@ def cutlens(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
                 break # in desired state, stop looping
             time.sleep(0.1)  
 
-        # when first cutting a line, for the first 10mm, move in y at a slower feedspeed
-        cq.commands.motion.moveabsolute(["Y"], [ystart+10],  [5.0])
+        # move at slower feespeed for first 10 mm
+        cq.commands.motion.moveabsolute(["Y"], [ystart+10], [5])
         cq.commands.motion.waitforinposition(["Y"])
         cq.commands.motion.waitformotiondone(["Y"])
-
+        
         cq.commands.motion.moveabsolute(["Y"], [yend], [feedspeed])
         cq.commands.motion.waitforinposition(["Y"])
         cq.commands.motion.waitformotiondone(["Y"])
@@ -775,12 +875,12 @@ def cutlens(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
 
 
         if (camnum_int + 1) % lines_per_test == 0:
-            info = run_alumina_test_touch(
+            info = run_test_touch(
                 controller = controller,
                 cq=cq,
                 camnum=camnum,
                 testtouchpath = testtouchpath,
-                wearshiftpath=wearshiftpath,
+                zcorrpath=zcorrpath,
                 zaxis=zaxis,
                 lines_per_test=lines_per_test,
             )
@@ -794,3 +894,163 @@ def cutlens(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
     with open(lockfile, "w") as f:
         f.write("")
 
+
+def load_wear_shift_table(path):
+    """
+    File format assumed:
+        camnum   wearshift
+    Returns dict[int] -> float
+    """
+    path = Path(path)
+    table = {}
+    with open(path, 'r', encoding='utf-8') as f:
+        for line in f:
+            if not line.strip() or line.strip().startswith('#'):
+                continue
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            key = int(float(parts[0]))
+            val = float(parts[1])
+            table[key] = val
+    return table
+
+
+def load_test_touch_table(path):
+    """
+    File format assumed:
+        index  X  Y  Z
+    (1-based index like Aerobasic)
+    Returns dict[int] -> (X, Y, Z)
+    """
+    path = Path(path)
+    table = {}
+    with open(path, 'r', encoding='utf-8') as f:
+        for line in f:
+            if not line.strip() or line.strip().startswith('Spindle'):
+                continue
+            parts = line.split()
+            if len(parts) < 4:
+                continue
+            x = float(parts[1])
+            y = float(parts[2])
+            z = float(parts[3])
+            table = (x, y, z)
+    return table
+
+
+def load_test_touch_table(path):
+    """
+    File format assumed:
+        index  X  Y  Z
+    (1-based index like Aerobasic)
+    Returns dict[int] -> (X, Y, Z)
+    """
+    path = Path(path)
+    table = {}
+    with open(path, 'r', encoding='utf-8') as f:
+        for line in f:
+            if not line.strip() or line.strip().startswith('Spindle'):
+                continue
+            parts = line.split()
+            if len(parts) < 4:
+                continue
+            x = float(parts[1])
+            y = float(parts[2])
+            z = float(parts[3])
+            table = (x, y, z)
+    return table
+
+def testtouch_fromfile(controller, cq, path, zaxis, floodport, rot=None):
+    """
+    allows us to read in the .txt file that generates a test touch 
+    and goes at the speed we care to
+
+    rot: the rotation angle in int form not string
+    """
+
+    x, y, z = load_test_touch_table(path)
+    print('TT at Location: ', 'X', x, 'Y', y, 'Z', z)
+
+    cq.pause()
+
+    # make sure zaxis is all the way up for the active zaxis
+    print("CHECK THAT ALL Z AXES ARE AT 0")
+    cq.commands.motion.moveabsolute(axes=[zaxis], positions=[0], speeds=[12])
+    cq.commands.motion.waitforinposition([zaxis])
+    cq.commands.motion.waitformotiondone([zaxis])
+    cq.resume()
+    
+    cq.pause()
+    cq.commands.motion.moveabsolute(axes=["X", "Y"], positions=[x, y], speeds=[20.0, 20.0])
+    cq.commands.motion.waitforinposition(["X", "Y"])
+    cq.commands.motion.waitformotiondone(["X", "Y"])
+    cq.commands.motion.movedelay(["X", "Y"], delay_time=1_000)
+    cq.resume()
+    
+    if rot is not None:
+        cq.pause()
+        cq.commands.motion.moveabsolute(axes=["U"], positions=[rot], speeds=[30])
+        cq.commands.motion.waitforinposition(["U"])
+        cq.commands.motion.waitformotiondone(["U"])
+        cq.commands.motion.movedelay(["U"], delay_time=1_000)
+        cq.resume()
+
+    
+    cq.pause()
+    # now move in zaxis to test touch location
+    cq.commands.motion.moveabsolute(axes=[zaxis], positions=[z+20], speeds=[6])
+    cq.commands.motion.waitforinposition([zaxis])
+    cq.commands.motion.waitformotiondone([zaxis])
+    cq.resume()
+
+    
+    cq.pause()
+    cq.commands.motion.moveabsolute(axes=[zaxis], positions=[z+10], speeds=[2])
+    cq.commands.motion.waitforinposition([zaxis])
+    cq.commands.motion.waitformotiondone([zaxis])
+    cq.resume()
+
+    cq.pause()
+    cq.commands.motion.moveabsolute(axes=[zaxis], positions=[z+5], speeds=[2])
+    cq.commands.motion.waitforinposition([zaxis])
+    cq.commands.motion.waitformotiondone([zaxis])
+    cq.resume()
+
+
+    cq.pause()
+    cq.commands.motion.moveabsolute(axes=[zaxis], positions=[z+1], speeds=[1])
+    cq.commands.motion.waitforinposition([zaxis])
+    cq.commands.motion.waitformotiondone([zaxis])
+    cq.commands.motion.movedelay([zaxis], delay_time=3_000)
+    cq.resume()
+
+    
+    cq.pause()
+    cq.commands.motion.moveabsolute(axes=[zaxis], positions=[z+0.5], speeds=[0.1])
+    cq.commands.motion.waitforinposition([zaxis])
+    cq.commands.motion.waitformotiondone([zaxis])
+    cq.resume()
+    
+    cq.pause()
+    cq.commands.motion.moveabsolute(axes=[zaxis], positions=[z], speeds=[0.01])
+    cq.commands.motion.waitforinposition([zaxis])
+    cq.commands.motion.waitformotiondone([zaxis])
+    cq.commands.motion.movedelay([zaxis], delay_time=500)
+    cq.resume()
+    
+    # move z up to 0 
+    cq.pause()
+    cq.commands.motion.moveabsolute([zaxis], [0.0], [12])
+    cq.resume()
+
+    time.sleep(1)
+    cq.wait_for_empty()
+    controller.runtime.commands.end_command_queue(cq)
+
+    # --- Flood OFF for all ---
+
+    cq.commands.io.digitaloutputset(axis='X', output_num=floodport, value=0)
+
+    
+    return True, print('Test Touch finished, flood cooling turned off')
