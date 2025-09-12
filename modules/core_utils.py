@@ -440,6 +440,10 @@ def cutcamming(controller, cq, path, zaxis, cuttype, safelift, feedspeed, rot=No
     cq.commands.motion.moveabsolute([zaxis], [0.0], [11])
     controller.runtime.commands.end_command_queue(cq)
 
+    # --- Flood OFF ---
+    cq.commands.io.digitaloutputset(axis='X', output_num=floodport, value=0)
+
+
     lockfile = path/'lockfile.lock'
     with open(lockfile, "w") as f:
         f.write("")
@@ -1048,7 +1052,7 @@ def testtouch_fromfile(controller, cq, path, zaxis, floodport, rot=None):
     cq.wait_for_empty()
     controller.runtime.commands.end_command_queue(cq)
 
-    # --- Flood OFF for all ---
+    # --- Flood OFF ---
 
     cq.commands.io.digitaloutputset(axis='X', output_num=floodport, value=0)
 
