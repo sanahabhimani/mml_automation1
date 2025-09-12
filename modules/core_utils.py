@@ -324,6 +324,7 @@ def get_cutcam_coords(campath):
 
 def cutcamming(controller, cq, path, zaxis, cuttype, safelift, feedspeed, rot=None):
     """
+    path = path straight up to the cutcamming file
     add docstrings here
     """
     path = Path(path)
