@@ -19,9 +19,7 @@ def testtouch_metrology(
     command_queue, controller,
     numX, lengthX,
     Xstart, Ystart, Zstart, Zdrop,
-    outname, comport="COM4",
-    dwell_ms_at_depth=0  # set >0 if you want a hardware dwell at depth
-):
+    outname, dwell_ms_at_depth=0, comport="COM4"):
     """
     Y is fixed. For each X:
       - Move to (X, Ystart, Zstart), wait
@@ -44,7 +42,7 @@ def testtouch_metrology(
         command_queue.commands.motion.enable(ax)
 
     # Move to start (Y fixed)
-    command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[0.0], speeds=[8.0])
+    command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[0.0], speeds=[11.0])
     command_queue.commands.motion.waitformotiondone(["ZA"])
     command_queue.commands.motion.waitforinposition(["ZA"])
     command_queue.commands.motion.moveabsolute(axes=["X"], positions=[Xstart], speeds=[15.0])
@@ -65,11 +63,11 @@ def testtouch_metrology(
 
         # 1) Row point: (x, Ystart, Zstart) and wait
         command_queue.commands.motion.moveabsolute(
-            axes=["X", "Y", "ZA"], positions=[x, Ystart, Zstart], speeds=[10.0, 10.0, 3.0]
+            axes=["X", "Y", "ZA"], positions=[x, Ystart, Zstart], speeds=[10.0, 10.0, 8.0]
         )
         command_queue.commands.motion.waitformotiondone(["X", "Y", "ZA"])
         command_queue.commands.motion.waitforinposition(["X", "Y", "ZA"])
-        command_queue.commands.motion.movedelay("ZA", 2_000)
+        command_queue.commands.motion.movedelay("ZA", 1_000)
         
 
         # 2) Drop to depth and dwell so we can pause and query data points
@@ -79,7 +77,7 @@ def testtouch_metrology(
         command_queue.commands.motion.waitformotiondone(["ZA"])
         command_queue.commands.motion.movedelay("ZA", int(dwell_ms_at_depth))
 
-        command_queue.commands.motion.movedelay(["X", "Y", "ZA"], 4_000)
+        command_queue.commands.motion.movedelay(["X", "Y", "ZA"], 1_000)
         
         ser.write(b"RMD0\r\n")  # replace with your gauge's measurement command if needed
         time.sleep(0.05)
@@ -88,7 +86,7 @@ def testtouch_metrology(
 
         while True:
             pos = _get_program_pos(controller, axes=("X","Y","ZA"))
-            if pos['X'] == x and pos['Y'] == Ystart and pos['ZA'] == depth:
+            if _within(pos['X'], x, 1e-3) and _within(pos['ZA'], depth, 1e-3):
                 line = f"{pos['X']}, {pos['Y']}, {pos['ZA']}, {sensor}\n"
                 f.write(line)
                 f.flush()
@@ -98,15 +96,14 @@ def testtouch_metrology(
                 time.sleep(0.1)  # tiny delay before re-check
                 
 
-        #command_queue.commands.motion.movedelay("ZA", 2_000)
-        command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[Zstart], speeds=[7.0])
+        command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[Zstart], speeds=[8.0])
         command_queue.commands.motion.waitformotiondone(["ZA"])
         command_queue.commands.motion.waitforinposition(["ZA"])
-        command_queue.commands.motion.movedelay("X", 4_000)
+        command_queue.commands.motion.movedelay("X", 1_000)
         command_queue.wait_for_empty()  # ensure retract finished before next X
         
     # Park and end
-    command_queue.commands.motion.movedelay("ZA", 3_000)
+    command_queue.commands.motion.movedelay("ZA", 1_000)
     command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[0.0], speeds=[8.0])
     command_queue.commands.motion.waitformotiondone(["ZA"])
     command_queue.commands.motion.waitforinposition(["ZA"])

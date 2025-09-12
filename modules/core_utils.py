@@ -433,7 +433,6 @@ def cutcamming(controller, cq, path, zaxis, cuttype, safelift, feedspeed):
     with open(lockfile, "w") as f:
         f.write("")
 
-
 def cutalumina(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
                testtouchpath, wearshiftpath, lines_per_test):
     path = Path(path)
