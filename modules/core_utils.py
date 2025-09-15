@@ -966,6 +966,7 @@ def load_test_touch_table(path):
             table = (x, y, z)
     return table
 
+
 def testtouch_fromfile(controller, cq, path, zaxis, floodport, rot=None):
     """
     allows us to read in the .txt file that generates a test touch 
@@ -1051,11 +1052,12 @@ def testtouch_fromfile(controller, cq, path, zaxis, floodport, rot=None):
 
     time.sleep(1)
     cq.wait_for_empty()
+    cq.commands.io.digitaloutputset(axis='X', output_num=floodport, value=0)
     controller.runtime.commands.end_command_queue(cq)
 
     # --- Flood OFF ---
 
-    cq.commands.io.digitaloutputset(axis='X', output_num=floodport, value=0)
+    
 
     
     return True, print('Test Touch finished, flood cooling turned off')
