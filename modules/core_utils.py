@@ -322,7 +322,7 @@ def get_cutcam_coords(campath):
     return leader_values, follower_values
 
 
-def cutcamming(controller, cq, path, zaxis, cuttype, safelift, feedspeed, rot=None):
+def cutcamming(controller, cq, path, zaxis, cuttype, safelift, feedspeed, floodport, rot=None):
     """
     path = path straight up to the cutcamming file
     add docstrings here
@@ -438,12 +438,13 @@ def cutcamming(controller, cq, path, zaxis, cuttype, safelift, feedspeed, rot=No
 
         # drain the queue before we are ready to cut the next line
         cq.wait_for_empty()
+
+    cq.commands.io.digitaloutputset(axis='X', output_num=floodport, value=0)
     cq.commands.motion.moveabsolute([zaxis], [0.0], [11])
     controller.runtime.commands.end_command_queue(cq)
 
     # --- Flood OFF ---
-    cq.commands.io.digitaloutputset(axis='X', output_num=floodport, value=0)
-
+    
 
     lockfile = path/'lockfile.lock'
     with open(lockfile, "w") as f:
