@@ -395,22 +395,26 @@ def flange_metrology(
         # Drop to depth
         command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[depth], speeds=[3.0])
         command_queue.commands.motion.waitforinposition(["ZA"])
+        command_queue.commands.motion.waitformotiondone(["ZA"])
 
-        # dwell at depth
-        command_queue.commands.motion.movedelay(["X","Y","ZA"], dwell_ms_at_depth)
-
-        # Read gauge
-        ser.write(b"RMD0\r\n")
-        time.sleep(0.05)
-        sensor = ser.read(2048).decode("utf-8", errors="ignore").strip()
-
+        
+        
         # while True pose check (like dressing_metrology)
         while True:
             pos = _get_program_pos(controller, axes=("X","Y","ZA"))
             if (_within(pos['X'], xval, 1e-3) and
                 _within(pos['Y'], yval, 1e-3) and
                 _within(pos['ZA'], depth, 1e-3)):
+
+                # dwell at depth
+                command_queue.commands.motion.movedelay(["X","Y","ZA"], 500)
+
+                # read probe 
+                ser.write(b"RMD0\r\n")
+                sensor = ser.read(2048).decode("utf-8", errors="ignore").strip()
                 line = f"{pos['X']}, {pos['Y']}, {pos['ZA']}, {sensor}\n"
+
+                # write to file
                 f.write(line)
                 f.flush()
                 print(f"{pos['ZA']}, {sensor}")
@@ -507,27 +511,29 @@ def plane_metrology(
             command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[depth], speeds=[3.0])
             command_queue.commands.motion.waitforinposition(["ZA"])
 
-            # dwell at depth
-            command_queue.commands.motion.movedelay(["X","Y","ZA"], dwell_ms_at_depth)
-
-            # Read gauge
-            ser.write(b"RMD0\r\n")
-            time.sleep(0.05)
-            sensor = ser.read(2048).decode("utf-8", errors="ignore").strip()
-
-            # while True pose check (same as dressing_metrology)
+            
             while True:
                 pos = _get_program_pos(controller, axes=("X","Y","ZA"))
                 if (_within(pos['X'], xval, 1e-3) and
                     _within(pos['Y'], yval, 1e-3) and
                     _within(pos['ZA'], depth, 1e-3)):
+
+                    # dwell at depth
+                    command_queue.commands.motion.movedelay(["X","Y","ZA"], 500)
+
+                    # read probe 
+                    ser.write(b"RMD0\r\n")
+                    sensor = ser.read(2048).decode("utf-8", errors="ignore").strip()
                     line = f"{pos['X']}, {pos['Y']}, {pos['ZA']}, {sensor}\n"
+
+                    # write to file
                     f.write(line)
                     f.flush()
                     print(f"{pos['ZA']}, {sensor}")
                     break
                 else:
                     time.sleep(0.1)
+
 
             # Retract
             command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[moveheight], speeds=[7.0])
