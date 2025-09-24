@@ -675,7 +675,8 @@ def run_test_touch(
     testtouchpath,
     zcorrpath,
     zaxis,
-    lines_per_test
+    lines_per_test,
+    rot = None
 ):
     """
     Lines per test arg tells us how many lines we wanna cut between test touches
@@ -686,6 +687,7 @@ def run_test_touch(
     This is for running within the cutlens function for when we wanna cut high frequency lenses and are going by batches of 
     100-200 cuts. Similar to alumina but blade doesn't wear with silicon the same way so we'll put in raw z corrections to make
     based on these test touches that are run when running the cuts
+    rot = the rotation angel to do the test touch on 
     """
     camnum = int(camnum)
 
@@ -706,6 +708,14 @@ def run_test_touch(
     cq.commands.motion.waitforinposition(["X"])
     cq.commands.motion.waitforinposition(["Y"])
     cq.commands.motion.movedelay(["X", "Y"], delay_time = 1_000)
+
+    if rot is not None:
+        cq.pause()
+        cq.commands.motion.moveabsolute(axes=["U"], positions=[rot], speeds=[20])
+        cq.commands.motion.waitforinposition(["U"])
+        cq.commands.motion.waitformotiondone(["U"])
+        cq.commands.motion.movedelay(["U"], delay_time=1_000)
+        cq.resume()
 
     # Z to z_touch + 2 @ z_approach_speed
     cq.commands.motion.moveabsolute([zaxis], [z_touch + 2.0], [10])
@@ -745,7 +755,7 @@ def run_test_touch(
 
 
 def cutlens_segments(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
-               testtouchpath, zcorrpath, lines_per_test):
+               testtouchpath, zcorrpath, lines_per_test, cut_rot=None, tt_rot=None):
     """
     Cut lens segment mimic the cut alumina but instead of a wearshift file path it's given 
     a zcorrection file path 
@@ -753,6 +763,9 @@ def cutlens_segments(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
     Ultimately, this function won't be necessary if we're generating wearshift files that 
     are just 1 value all the way down the line if we're using the same code that generates wear
     shift files and just stating that the blade wear is 0
+
+    cut_rot is the rotation that we do our cuts on
+    tt_rot is the rotation that we need to do our test touch rotation on 
     """
     path = Path(path)
     assert path.exists(), f"Base path not found: {path}"
@@ -809,6 +822,14 @@ def cutlens_segments(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
         cq.commands.motion.waitforinposition(["X"])
         cq.commands.motion.movedelay(["X", "Y"], delay_time=1_500)
 
+        if cut_rot is not None:
+            cq.pause()
+            cq.commands.motion.moveabsolute(axes=["U"], positions=[cut_rot], speeds=[20])
+            cq.commands.motion.waitforinposition(["U"])
+            cq.commands.motion.waitformotiondone(["U"])
+            cq.commands.motion.movedelay(["U"], delay_time=1_000)
+            cq.resume()
+
         cq.commands.motion.moveabsolute([zaxis], [zstart + 2.0], [SPEED_Z])
         cq.commands.motion.waitforinposition([zaxis])
         cq.commands.motion.moveabsolute([zaxis], [zstart+1], [0.5])
@@ -864,7 +885,6 @@ def cutlens_segments(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
         while True:
             statuses = check_axis_status_position(controller=controller, axis=zaxis)
             if statuses['camming_bit'] is False:
-                print(f"{zaxis} camming status is off, {camnum} line finished cutting.")
                 break # in desired state, stop looping
             time.sleep(0.1)  
         
@@ -889,6 +909,7 @@ def cutlens_segments(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
                 zcorrpath=zcorrpath,
                 zaxis=zaxis,
                 lines_per_test=lines_per_test,
+                rot=tt_rot
             )
             print(f"did test touch #{info['test_touch_index']}", info)
 
