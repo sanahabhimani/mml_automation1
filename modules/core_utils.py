@@ -752,9 +752,7 @@ def run_test_touch(
         "camnum": camnum,
         "test_touch_index": tt_index,
         "X": ttx, "Y": tty,
-        "Z_test_touch_raw": ttz,
-        "wear_shift": wear_shift,
-        "Z_touch_final": z_touch,
+        "Z": z_touch,
     }
 
 
@@ -989,27 +987,6 @@ def load_test_touch_table(path):
     return table
 
 
-def load_test_touch_table(path):
-    """
-    File format assumed:
-        index  X  Y  Z
-    (1-based index like Aerobasic)
-    Returns dict[int] -> (X, Y, Z)
-    """
-    path = Path(path)
-    table = {}
-    with open(path, 'r', encoding='utf-8') as f:
-        for line in f:
-            if not line.strip() or line.strip().startswith('Spindle'):
-                continue
-            parts = line.split()
-            if len(parts) < 4:
-                continue
-            x = float(parts[1])
-            y = float(parts[2])
-            z = float(parts[3])
-            table = (x, y, z)
-    return table
 
 
 def testtouch_fromfile(controller, cq, path, zaxis, floodport, rot=None):
