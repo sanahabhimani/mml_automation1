@@ -673,9 +673,9 @@ def run_test_touch(
     cq,
     camnum,
     testtouchpath,
-    zcorrpath,
     zaxis,
     lines_per_test,
+    zshift = None,
     rot = None
 ):
     """
@@ -688,20 +688,24 @@ def run_test_touch(
     100-200 cuts. Similar to alumina but blade doesn't wear with silicon the same way so we'll put in raw z corrections to make
     based on these test touches that are run when running the cuts
     rot = the rotation angel to do the test touch on 
+
+    NOTE THAT THIS FUNCTION DOES NOT END THE QUEUE AS IT WORKS INSIDE OTHER FUNCTIONS. IMPORTANT WARNING TO STATE
+
     """
     camnum = int(camnum)
 
     tt_table = load_test_touch_table(testtouchpath)
-    zcorr_table = load_wear_shift_table(zcorrpath)
 
     tt_index = camnum // lines_per_test
     print('tt index', tt_index)
     if tt_index not in tt_table:
-        raise KeyError(f"Test-touch index {tt_index} not found in {test_touch_file}")
+        raise KeyError(f"Test-touch index {tt_index} not found in {testtouchpath}")
 
     ttx, tty, ttz = tt_table[tt_index]
-    zcorr = zcorr_table.get(camnum, 0.0)
-    z_touch = ttz + zcorr
+    if zshift:
+        z_touch = ttz + zshift
+    else:
+        z_touch = ttz
 
     # XY
     cq.commands.motion.moveabsolute(["X", "Y"], [ttx, tty], [20, 20])
@@ -738,7 +742,7 @@ def run_test_touch(
     # retract to Z = 0
     cq.commands.motion.moveabsolute([zaxis], [0.0], [20])
     cq.commands.motion.waitforinposition([zaxis])
-    cq.commands.motion.movedelay(['ZC'], delay_time=1_000)
+    cq.commands.motion.movedelay(['ZC'], delay_time=500)
 
     # X out
     cq.commands.motion.moveabsolute(["X"], [-275], [30]) 
@@ -754,8 +758,8 @@ def run_test_touch(
     }
 
 
-def cutlens_segments(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
-               testtouchpath, zcorrpath, lines_per_test, cut_rot=None, tt_rot=None):
+def cutlens_segments(controller, cq, path, spindle, zaxis, cuttype, safelift, feedspeed,
+               testtouchpath, lines_per_test, cut_rot=None, tt_rot=None, zshift=None):
     """
     Cut lens segment mimic the cut alumina but instead of a wearshift file path it's given 
     a zcorrection file path 
@@ -764,71 +768,75 @@ def cutlens_segments(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
     are just 1 value all the way down the line if we're using the same code that generates wear
     shift files and just stating that the blade wear is 0
 
+    path is path to CutCamming{cuttype} path; i.e., the thinking involved for the new z shifts
+    is done outside of this function for simplicity's sake (in shiftZ_silicon from metalens modules)
     cut_rot is the rotation that we do our cuts on
     tt_rot is the rotation that we need to do our test touch rotation on 
+
+    spindle is string for path concatenation: 'SpindleC'
+    zshift is any z correction we applied from shiftZ_silicon metalens function
     """
     path = Path(path)
     assert path.exists(), f"Base path not found: {path}"
+    cutpath = path / spindle / f"CutCamming{cuttype}/" 
 
     mastername = "Master.txt"
-    masterpath = Path(path) / mastername  
-    assert masterpath.exists(), f"Master file not found: {masterpath}"
-
-    # Load zcorr table
-    zcorr_table = load_wear_shift_table(zcorrpath)
-
+    masterpath = cutpath / mastername
+    assert masterpath.is_file(), f"Master file not found: {masterpath}"
+    
     cu._check_lockfile(path)
-    campaths = iter_cam_paths_from_master(master_path=masterpath, base_path=path, cuttype=cuttype)
+    campaths = iter_cam_paths_from_master(master_path=masterpath, base_path=cutpath, cuttype=cuttype)
+
+    
+    cq.pause()
+    cq.commands.motion.moveabsolute([zaxis], [0], [5])
+    cq.commands.motion.waitforinposition([zaxis])
+    cq.commands.motion.waitformotiondone([zaxis])
+    cq.commands.motion.movedelay([zaxis], delay_time=500)
+
+    cq.resume()
+    if cut_rot:
+        cq.commands.motion.moveabsolute(["U"], [cut_rot], [20])
+        cq.commands.motion.waitforinposition(["U"])
+        cq.commands.motion.waitformotiondone(["U"])
+        cq.commands.motion.movedelay(["U"], delay_time=1_000)
+
+    
     
     am = cq.commands.advanced_motion
-    for campath in campaths[0:4]:
+    for campath in campaths:
         assert campath.exists(), f"Campath not found: {campath}"
         
         camnum = Path(campath).stem[-4:]
         camnum_int = int(camnum)
-        zcorr = zcorr_table.get(camnum_int, 0.0)
 
-        # get coordinates, including original non-wear shifted z coordinate
         yvals, zvals = get_cutcam_coords(campath)
-        xstart, ystart, zstart_raw, yend = read_startend_coords(master_path=masterpath, camnum=camnum)
-        
-        # apply wear-shift to camming z-values and zstart value
-        zvals_shifted = [z + zcorr for z in zvals]
-        zstart = zstart_raw + zcorr
-        print(zstart)
+        xstart, ystart, zstart, yend = read_startend_coords(master_path=masterpath, camnum=camnum)
 
         # now set up aerotech camming conditions
         am.cammingfreetable(1) 
         am.cammingloadtablefromarray(
             table_num=1,
             leader_values=yvals,
-            follower_values=zvals_shifted,
+            follower_values=zvals,
             num_values=len(yvals),
             units_mode=a1.CammingUnits.Primary,               
             interpolation_mode=a1.CammingInterpolation.Linear, 
             wrap_mode=a1.CammingWrapping.NoWrap,               
             table_offset=0.0)
-        print(f'Camming table loaded for {camnum} file with wear shift = {wearshift}')
         
         SPEED_Y  = 20.0  # mm/s
         SPEED_X  = 20.0   
         SPEED_Z = 12.0  # (down to zstart+2)
-        # TODO: PRIORITY 1 --- check if we want ZC touch speed to be slower
+
         SPEED_Z_TOUCH    = 0.1  # (final settle at zstart)
         
         # move to start positions, wait for in position
         cq.commands.motion.moveabsolute(["X", "Y"], [xstart, ystart], [SPEED_Y,  SPEED_X])
         cq.commands.motion.waitforinposition(["Y"])
         cq.commands.motion.waitforinposition(["X"])
-        cq.commands.motion.movedelay(["X", "Y"], delay_time=1_500)
+        cq.commands.motion.movedelay(["X", "Y"], delay_time=400)
 
-        if cut_rot is not None:
-            cq.pause()
-            cq.commands.motion.moveabsolute(axes=["U"], positions=[cut_rot], speeds=[20])
-            cq.commands.motion.waitforinposition(["U"])
-            cq.commands.motion.waitformotiondone(["U"])
-            cq.commands.motion.movedelay(["U"], delay_time=1_000)
-            cq.resume()
 
         cq.commands.motion.moveabsolute([zaxis], [zstart + 2.0], [SPEED_Z])
         cq.commands.motion.waitforinposition([zaxis])
@@ -836,48 +844,44 @@ def cutlens_segments(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
         cq.commands.motion.waitforinposition([zaxis])
         cq.commands.motion.waitformotiondone([zaxis])
         
-        cq.commands.motion.moveabsolute([zaxis], [zstart+0.5], [0.1])
+        cq.commands.motion.moveabsolute([zaxis], [zstart], [0.1])
         cq.commands.motion.waitforinposition([zaxis])
         cq.commands.motion.waitformotiondone([zaxis])
-        
-        cq.commands.motion.moveabsolute([zaxis], [zstart], [0.01])
-        cq.commands.motion.waitforinposition([zaxis])
-        cq.commands.motion.waitformotiondone([zaxis])
-        
-        cq.commands.motion.movedelay([zaxis], delay_time=1_000)
+        cq.commands.motion.movedelay([zaxis], delay_time=500)
+        cq.wait_for_empty()
         
         while True:
             statuses = check_axis_status_position(controller=controller, axis=zaxis)
             if statuses['camming_bit'] is False:
-                break # in desired state, stop looping
+                break 
             time.sleep(0.1)  
 
         cq.commands.advanced_motion.cammingon(
             follower_axis=zaxis,
             leader_axis="Y",
             table_num=1,
-            source=a1.CammingSource.PositionCommand,  # leader uses position
+            source=a1.CammingSource.PositionCommand,  
             output=a1.CammingOutput.RelativePosition  
         )
 
-        ## TODO: there's gotta be something else we can do with the waitforinposition and wait for move done
-        ## TODO: something about InPositionTime value that we might be able to toggle
+
         while True:
             statuses = check_axis_status_position(controller=controller, axis=zaxis)
             if statuses['camming_bit'] is True:
-                print(f"{zaxis} camming bit is True; ready to cut line {camnum}")
-                break # in desired state, stop looping
+                print(f"{zaxis}: ready to cut line {camnum}")
+                break 
             time.sleep(0.1)  
 
-        # move at slower feespeed for first 10 mm
-        cq.commands.motion.moveabsolute(["Y"], [ystart+10], [5])
+        # move at slower feedspeed [feedspeed of 5] for first 10 mm 
+        # temporarily changed to 20 -- 9/24/25
+        cq.commands.motion.moveabsolute(["Y"], [ystart+20], [5])
         cq.commands.motion.waitforinposition(["Y"])
         cq.commands.motion.waitformotiondone(["Y"])
         
         cq.commands.motion.moveabsolute(["Y"], [yend], [feedspeed])
         cq.commands.motion.waitforinposition(["Y"])
         cq.commands.motion.waitformotiondone(["Y"])
-        cq.commands.motion.movedelay(["Y"], delay_time=2_000)
+        cq.commands.motion.movedelay(["Y"], delay_time=500)
 
         am.cammingoff(follower_axis=zaxis) 
 
@@ -885,7 +889,8 @@ def cutlens_segments(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
         while True:
             statuses = check_axis_status_position(controller=controller, axis=zaxis)
             if statuses['camming_bit'] is False:
-                break # in desired state, stop looping
+                break 
+            # TODO: PRIORITY 2 -- GOOD PLACE TO ADD LOGGING
             time.sleep(0.1)  
         
         # retract ZC and free table 1
@@ -894,27 +899,42 @@ def cutlens_segments(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
         cq.commands.motion.waitforinposition([zaxis])
         cq.commands.motion.waitformotiondone([zaxis])
         cq.commands.advanced_motion.cammingfreetable(1)
-        cq.commands.motion.movedelay([zaxis], delay_time=2_000)
+        cq.commands.motion.movedelay([zaxis], delay_time=500)
 
         # drain the queue before we are ready to cut the next line
         cq.wait_for_empty()
 
 
         if (camnum_int + 1) % lines_per_test == 0:
+            # First ensure that the Zaxis moves to zero as we may have to rotate
+            cq.pause()
+            cq.commands.motion.moveabsolute([zaxis], [0], [SPEED_Z])
+            cq.commands.motion.waitforinposition([zaxis])
+            cq.commands.motion.waitformotiondone([zaxis])
+            cq.resume()
+
             info = run_test_touch(
                 controller = controller,
                 cq=cq,
                 camnum=camnum,
                 testtouchpath = testtouchpath,
-                zcorrpath=zcorrpath,
                 zaxis=zaxis,
                 lines_per_test=lines_per_test,
                 rot=tt_rot
             )
-            print(f"did test touch #{info['test_touch_index']}", info)
+
+            if cut_rot:
+                cq.pause()
+                cq.commands.motion.moveabsolute(axes=["U"], positions=[cut_rot], speeds=[20])
+                cq.commands.motion.waitforinposition(["U"])
+                cq.commands.motion.waitformotiondone(["U"])
+                cq.commands.motion.movedelay(["U"], delay_time=1_000)
+                cq.resume()
+
+            print(f"Performed test touch #{info['test_touch_index']}", info)
 
         
-    cq.commands.motion.moveabsolute([zaxis], [0.0], [15])
+    cq.commands.motion.moveabsolute([zaxis], [0.0], [11])
     controller.runtime.commands.end_command_queue(cq)
 
     lockfile = path/'lockfile.lock'
@@ -952,17 +972,20 @@ def load_test_touch_table(path):
     """
     path = Path(path)
     table = {}
-    with open(path, 'r', encoding='utf-8') as f:
+    with path.open('r', encoding='utf-8') as f:
         for line in f:
-            if not line.strip() or line.strip().startswith('Spindle'):
+            s = line.strip()
+            if not s or s.startswith('Spindle'):
                 continue
-            parts = line.split()
+            parts = s.split()
             if len(parts) < 4:
                 continue
-            x = float(parts[1])
-            y = float(parts[2])
-            z = float(parts[3])
-            table = (x, y, z)
+            try:
+                idx = int(parts[0])
+                x, y, z = map(float, parts[1:4])
+            except ValueError:
+                continue
+            table[idx] = (x, y, z)
     return table
 
 
