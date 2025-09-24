@@ -75,27 +75,24 @@ def testtouch_metrology(
         command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[depth], speeds=[3.0])
         command_queue.commands.motion.waitforinposition(["ZA"])
         command_queue.commands.motion.waitformotiondone(["ZA"])
-        command_queue.commands.motion.movedelay("ZA", int(dwell_ms_at_depth))
-
-        command_queue.commands.motion.movedelay(["X", "Y", "ZA"], 1_000)
-        
-        ser.write(b"RMD0\r\n")  # replace with your gauge's measurement command if needed
-        time.sleep(0.05)
-        
-        sensor = ser.read(2048).decode("utf-8", errors="ignore").strip()
-
+       
         while True:
             pos = _get_program_pos(controller, axes=("X","Y","ZA"))
             if _within(pos['X'], x, 1e-3) and _within(pos['ZA'], depth, 1e-3):
-                line = f"{pos['X']}, {pos['Y']}, {pos['ZA']}, {sensor}\n"
-                f.write(line)
-                f.flush()
-                print(f"{pos['X']}, {pos['Y']}, {pos['ZA']}, {sensor}")
-                break   # exit while, go to next X
+                 # dwell in position
+                 command_queue.commands.motion.movedelay(["X", "Y", "ZA"], 1_000)
+                 
+                 ser.write(b"RMD0\r\n") 
+                 sensor = ser.read(2048).decode("utf-8", errors="ignore").strip()
+                 line = f"{pos['X']}, {pos['Y']}, {pos['ZA']}, {sensor}\n"
+                 f.write(line)
+                 f.flush()
+                 print(f"{pos['X']}, {pos['Y']}, {pos['ZA']}, {sensor}")
+                 break   
             else:
-                time.sleep(0.1)  # tiny delay before re-check
+                time.sleep(0.1)  
                 
-
+        command_queue.commands.motion.movedelay("ZA", 500)
         command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[Zstart], speeds=[8.0])
         command_queue.commands.motion.waitformotiondone(["ZA"])
         command_queue.commands.motion.waitforinposition(["ZA"])
@@ -103,7 +100,7 @@ def testtouch_metrology(
         command_queue.wait_for_empty()  # ensure retract finished before next X
         
     # Park and end
-    command_queue.commands.motion.movedelay("ZA", 1_000)
+    command_queue.commands.motion.movedelay("ZA", 500)
     command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[0.0], speeds=[8.0])
     command_queue.commands.motion.waitformotiondone(["ZA"])
     command_queue.commands.motion.waitforinposition(["ZA"])
