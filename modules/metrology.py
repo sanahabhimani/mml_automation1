@@ -119,8 +119,7 @@ def dressing_metrology(
     command_queue, controller,
     numX, lengthX, numY, lengthY,
     Xstart, Ystart, Zstart, Zdrop,
-    outname, comport="COM4",
-    dwell_ms_at_depth=1_000  # set >0 if you want a hardware dwell at depth
+    outname, comport="COM4"  # set >0 if you want a hardware dwell at depth
 ):
     """
     For each X and Y:
@@ -184,10 +183,7 @@ def dressing_metrology(
             command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[depth], speeds=[3.0])
             command_queue.commands.motion.waitforinposition(["ZA"])
             command_queue.commands.motion.waitformotiondone(["ZA"])
-            #command_queue.commands.motion.movedelay("ZA", int(dwell_ms_at_depth))
-    
-            #command_queue.commands.motion.movedelay(["X", "Y", "ZA"], 4_000)
-            
+
             
             while True:
                 pos = _get_program_pos(controller, axes=("X","Y","ZA"))
@@ -302,7 +298,6 @@ def lens_metrology(
 
             # Read gauge
             ser.write(b"RMD0\r\n")
-            time.sleep(0.05)
             sensor = ser.read(2048).decode("utf-8", errors="ignore").strip()
 
             # while True pose check (like dressing/plane)
@@ -311,6 +306,9 @@ def lens_metrology(
                 if (_within(pos['X'], xval, 1e-3) and
                     _within(pos['Y'], yval, 1e-3) and
                     _within(pos['ZA'], depth, 1e-3)):
+                    command_queue.commands.motion.movedelay(["X", "Y", "ZA"], 500)
+                    ser.write(b"RMD0\r\n")
+                    sensor = ser.read(2048).decode("utf-8", errors="ignore").strip()
                     line = f"{pos['X']}, {pos['Y']}, {pos['ZA']}, {sensor}\n"
                     f.write(line)
                     f.flush()
