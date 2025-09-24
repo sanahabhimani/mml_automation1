@@ -111,7 +111,6 @@ def testtouch_metrology(
     ser.close()
  
 
-
 def dressing_metrology(
     command_queue, controller,
     numX, lengthX, numY, lengthY,
@@ -334,7 +333,6 @@ def lens_metrology(
     ser.close()
 
 
-
 def flange_metrology(
     command_queue, controller,
     numpoints, circlediam, Xcenter, Ycenter,
@@ -433,7 +431,6 @@ def flange_metrology(
     controller.runtime.commands.end_command_queue(command_queue)
     f.close()
     ser.close()
-
 
 
 def plane_metrology(
@@ -552,7 +549,6 @@ def plane_metrology(
     controller.runtime.commands.end_command_queue(command_queue)
     f.close()
     ser.close()
-
 
 
 def _within(v, target, tol=1e-3):
