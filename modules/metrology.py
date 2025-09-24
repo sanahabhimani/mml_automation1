@@ -120,7 +120,7 @@ def dressing_metrology(
     numX, lengthX, numY, lengthY,
     Xstart, Ystart, Zstart, Zdrop,
     outname, comport="COM4",
-    dwell_ms_at_depth=0  # set >0 if you want a hardware dwell at depth
+    dwell_ms_at_depth=1_000  # set >0 if you want a hardware dwell at depth
 ):
     """
     For each X and Y:
@@ -186,25 +186,24 @@ def dressing_metrology(
             command_queue.commands.motion.waitformotiondone(["ZA"])
             #command_queue.commands.motion.movedelay("ZA", int(dwell_ms_at_depth))
     
-            command_queue.commands.motion.movedelay(["X", "Y", "ZA"], 250)
+            #command_queue.commands.motion.movedelay(["X", "Y", "ZA"], 4_000)
             
-            ser.write(b"RMD0\r\n")  # replace with your gauge's measurement command if needed
-            time.sleep(0.05)
             
-            sensor = ser.read(2048).decode("utf-8", errors="ignore").strip()
-    
             while True:
                 pos = _get_program_pos(controller, axes=("X","Y","ZA"))
-                if _within(pos['X'], x, 1e-3) and _within(pos['Y'], y, 1e-3) and _within(pos['ZA'], depth, 1e-3):            
+                if _within(pos['X'], x, 1e-3) and _within(pos['Y'], y, 1e-3) and _within(pos['ZA'], depth, 1e-3): 
+                    command_queue.commands.motion.movedelay(["X", "Y", "ZA"], 500)
+                    ser.write(b"RMD0\r\n")  # replace with your gauge's measurement command if needed
+                    sensor = ser.read(2048).decode("utf-8").strip()
                     line = f"{pos['X']}, {pos['Y']}, {pos['ZA']}, {sensor}\n"
                     f.write(line)
                     f.flush()
                     print(f"{pos['ZA']}, {sensor}")
+                    #time.sleep(2)
                     break   # exit while, go to next X
                 else:
                     time.sleep(0.1)  # tiny delay before re-check
                     
-    
             command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[Zstart], speeds=[7.0])
             command_queue.commands.motion.waitformotiondone(["ZA"])
             command_queue.commands.motion.waitforinposition(["ZA"])
@@ -212,7 +211,7 @@ def dressing_metrology(
             command_queue.wait_for_empty()  # ensure retract finished before next X
         
     # Park and end
-    command_queue.commands.motion.movedelay("ZA", 1_000)
+    command_queue.commands.motion.movedelay("ZA", 500)
     command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[0.0], speeds=[8.0])
     command_queue.commands.motion.waitformotiondone(["ZA"])
     command_queue.commands.motion.waitforinposition(["ZA"])
