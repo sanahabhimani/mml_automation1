@@ -13,8 +13,28 @@ import re
 import sys
 sys.path.append('C:\\Users\\UNIVERSITY\\git\\')
 sys.path.append('C:\\Users\\UNIVERSITY\\git\\metalens\\')
+import logging
+from datetime import datetime
 import metalens
 import core_utils as cu 
+
+# ---- Logging setup (only do this once) ----
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+fh = logging.FileHandler("cutting.log")
+ch = logging.StreamHandler()
+
+formatter = logging.Formatter("%(asctime)s - %(message)s")
+fh.setFormatter(formatter)
+ch.setFormatter(formatter)
+
+logger.addHandler(fh)
+logger.addHandler(ch)
+
+def log_cut_event(message: str):
+    logger.info(message)
+
 
 
 def check_io_status(controller, port, name, axis='X', execution_task_index=1):
@@ -901,7 +921,11 @@ def cutlens_segments(controller, cq, path, spindle, zaxis, cuttype, safelift, fe
                 break 
             # TODO: PRIORITY 2 -- GOOD PLACE TO ADD LOGGING
             time.sleep(0.1)  
-        
+
+        # log for one line finished cutting
+        log_cut_event(f"{zaxis}: Finished cutting line #{camnum}")
+
+
         # retract ZC and free table 1
         # TODO: PRIORITY 1-- CHECK IF THIS IS THE ONLY PLACE THAT SAFELIFT IS USED IN SOURCE CODE
         cq.commands.motion.moveabsolute([zaxis], [zstart + safelift], [SPEED_Z])
@@ -939,7 +963,7 @@ def cutlens_segments(controller, cq, path, spindle, zaxis, cuttype, safelift, fe
             cq.wait_for_empty()
             print(f"Performed test touch #{info['test_touch_index']}", info)
 
-        
+
     cq.commands.motion.moveabsolute([zaxis], [0.0], [11])
     controller.runtime.commands.end_command_queue(cq)
 
