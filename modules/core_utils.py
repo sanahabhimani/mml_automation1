@@ -901,7 +901,6 @@ def cutlens_segments(controller, cq, path, spindle, zaxis, cuttype, safelift, fe
         while True:
             statuses = check_axis_status_position(controller=controller, axis=zaxis)
             if statuses['camming_bit'] is True:
-                print(f"{zaxis}: Cutting Line # {camnum}")
                 break 
             time.sleep(0.1)  
     
