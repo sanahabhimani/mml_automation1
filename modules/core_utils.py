@@ -971,7 +971,15 @@ def cutlens_segments(controller, cq, path, spindle, zaxis, cuttype, safelift, fe
 
 
     cq.commands.motion.moveabsolute([zaxis], [0.0], [11])
+    # turn off flood cooling
+    cq.commands.io.digitaloutputset(axis='X', output_num=floodport, value=0)
+    cq.commands.motion.moveabsolute([zaxis], [0.0], [11])
     controller.runtime.commands.end_command_queue(cq)
+
+    # close logging file because windows computer:
+    for handler in logger.handlers[:]:
+        handler.close()
+        logger.removeHandler(handler)
 
     lockfile = cutpath /'lockfile.lock'
     with open(lockfile, "w") as f:
