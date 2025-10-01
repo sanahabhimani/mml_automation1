@@ -1001,9 +1001,9 @@ def cutlens_segments(controller, cq, path, spindle, zaxis, cuttype, safelift, fe
     cq.commands.motion.waitforinposition([zaxis])
     cq.commands.motion.waitformotiondone([zaxis])
 
-    cq.commands.motion.moveabsolute(X, -275, 28)
-    cq.commands.motion.waitforinposition(X)
-    cq.commands.motion.waitformotiondone(X)
+    cq.commands.motion.moveabsolute("X", -275, 28)
+    cq.commands.motion.waitforinposition("X")
+    cq.commands.motion.waitformotiondone("X")
 
     # turn off flood cooling
     cq.commands.io.digitaloutputset(axis='X', output_num=floodport, value=0)
@@ -1178,15 +1178,14 @@ def testtouch_fromfile(controller, cq, path, zaxis, floodport, rot=None):
     time.sleep(1)
     cq.wait_for_empty()
     cq.commands.io.digitaloutputset(axis='X', output_num=floodport, value=0)
-    cq.commands.motion.moveabsolute(X, -275, 30)
-    cq.commands.motion.waitforinposition(X)
-    cq.commands.motion.waitformotiondone(X)
+    cq.commands.motion.moveabsolute(axes=["X"], positions=[-275], speeds=[30])
+    cq.commands.motion.waitforinposition("X")
+    cq.commands.motion.waitformotiondone("X")
     cq.wait_for_empty()
     controller.runtime.commands.end_command_queue(cq)
 
     # --- Flood OFF ---
 
-    
 
     
     return True, print('Test Touch finished, flood cooling turned off')
