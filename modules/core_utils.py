@@ -18,24 +18,6 @@ from datetime import datetime
 import metalens
 import core_utils as cu 
 
-# ---- Logging setup (only do this once) ----
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-
-fh = logging.FileHandler("cutting.log")
-ch = logging.StreamHandler()
-
-formatter = logging.Formatter("%(asctime)s - %(message)s")
-fh.setFormatter(formatter)
-ch.setFormatter(formatter)
-
-logger.addHandler(fh)
-logger.addHandler(ch)
-
-def log_cut_event(message: str):
-    logger.info(message)
-
-
 
 def check_io_status(controller, port, name, axis='X', execution_task_index=1):
     """
@@ -354,7 +336,13 @@ def cutcamming(controller, cq, path, zaxis, cuttype, safelift, feedspeed, floodp
     masterpath = Path(path) / mastername  
     assert masterpath.exists(), f"Master file not found: {masterpath}"
 
-    cu._check_lockfile(path)
+    lockfile = Path(path) / 'lockfile.lock'
+    if lockfile.exists():
+        # warn if lockfile exists
+        logger.info('LOCKFILE EXISTS FOR TEST CUTS. Proceeding to overwrite.')
+    else:
+        print("Lockfile not present, moving forward.")
+
     campaths = iter_cam_paths_from_master(master_path=masterpath, base_path=path, cuttype=cuttype)
 
     if rot:
@@ -385,8 +373,8 @@ def cutcamming(controller, cq, path, zaxis, cuttype, safelift, feedspeed, floodp
         xstart, ystart, zstart, yend = read_startend_coords(master_path=masterpath, camnum=camnum)
 
         
-        SPEED_Y  = 20.0  # mm/s
-        SPEED_X  = 20.0   
+        SPEED_Y  = 30.0  # mm/s
+        SPEED_X  = 30.0   
         SPEED_Z = 8.0  # (down to zstart+2)
         # TODO: PRIORITY 1 --- check if we want ZC touch speed to be slower
         SPEED_Z_TOUCH    = 0.1  # (final settle at zstart)
@@ -723,10 +711,10 @@ def run_test_touch(
     ttx, tty, ttz = tt_table[tt_index]
     if zshift is not None:
         z_touch = ttz + zshift
-        print('test touch adjusted to: ', z_touch)
+        print('test touch adjusted by {zshift}um to: ', z_touch)
     else:
         z_touch = ttz
-    print('test', ttx, tty, z_touch)
+    #print('test', ttx, tty, z_touch)
 
     # XY
     cq.commands.motion.moveabsolute(["X", "Y"], [ttx, tty], [20, 20])
@@ -828,7 +816,25 @@ def cutlens_segments(controller, cq, path, spindle, zaxis, cuttype, safelift, fe
         cq.commands.motion.waitformotiondone(["U"])
         cq.commands.motion.movedelay(["U"], delay_time=1_000)
 
-    
+    # Set up logging
+    log_path = path / "cutting.log"
+    logger = logging.getLogger("cut_logger")
+    logger.setLevel(logging.INFO)
+
+    # clear old handlers so you don't get duplicates
+    if logger.hasHandlers():
+        logger.handlers.clear()
+
+    fh = logging.FileHandler(log_path, "cutting.log")
+    ch = logging.StreamHandler()
+
+    formatter = logging.Formatter("%(asctime)s - %(message)s")
+    fh.setFormatter(formatter)
+    ch.setFormatter(formatter)
+
+    logger.addHandler(fh)
+    logger.addHandler(ch)
+
     
     am = cq.commands.advanced_motion
     for campath in campaths:
@@ -852,8 +858,8 @@ def cutlens_segments(controller, cq, path, spindle, zaxis, cuttype, safelift, fe
             wrap_mode=a1.CammingWrapping.NoWrap,               
             table_offset=0.0)
         
-        SPEED_Y  = 25.0  # mm/s
-        SPEED_X  = 25.0   
+        SPEED_Y  = 28.0  # mm/s
+        SPEED_X  = 28.0   
         SPEED_Z = 12.0  # (down to zstart+2)
 
         SPEED_Z_TOUCH    = 0.1  # (final settle at zstart)
@@ -923,7 +929,7 @@ def cutlens_segments(controller, cq, path, spindle, zaxis, cuttype, safelift, fe
             time.sleep(0.1)  
 
         # log for one line finished cutting
-        log_cut_event(f"{zaxis}: Finished cutting line #{camnum}")
+        logger.info("{zaxis}: Finished cutting line #{camnum}")
 
 
         # retract ZC and free table 1
@@ -950,7 +956,8 @@ def cutlens_segments(controller, cq, path, spindle, zaxis, cuttype, safelift, fe
                 testtouchpath=testtouchpath,
                 zaxis=zaxis,
                 lines_per_test=lines_per_test,
-                ttrot=ttrot
+                ttrot=ttrot,
+                zshift=zshift
             )
 
             if cut_rot is not None:
@@ -1040,6 +1047,7 @@ def load_single_testtouch(path):
             z = float(parts[3])
             table = (x, y, z)
     return table
+
 
 def testtouch_fromfile(controller, cq, path, zaxis, floodport, rot=None):
     """
