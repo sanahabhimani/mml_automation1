@@ -711,7 +711,7 @@ def run_test_touch(
     ttx, tty, ttz = tt_table[tt_index]
     if zshift is not None:
         z_touch = ttz + zshift
-        print('test touch adjusted by {zshift}um to: ', z_touch)
+        print(f'test touch adjusted by {zshift}um to: ', z_touch)
     else:
         z_touch = ttz
     #print('test', ttx, tty, z_touch)
