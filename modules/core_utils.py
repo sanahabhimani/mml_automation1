@@ -716,6 +716,25 @@ def run_test_touch(
         z_touch = ttz
     #print('test', ttx, tty, z_touch)
 
+     # Set up logging
+    log_path = path / "test_touch.log"
+    logger = logging.getLogger("testtouch_logger")
+    logger.setLevel(logging.INFO)
+
+    # clear old handlers so you don't get duplicates
+    if logger.hasHandlers():
+        logger.handlers.clear()
+
+    fh = logging.FileHandler(log_path, "test_touch.log")
+    ch = logging.StreamHandler()
+
+    formatter = logging.Formatter("%(asctime)s - %(message)s")
+    fh.setFormatter(formatter)
+    ch.setFormatter(formatter)
+
+    logger.addHandler(fh)
+    logger.addHandler(ch)
+
     # XY
     cq.commands.motion.moveabsolute(["X", "Y"], [ttx, tty], [20, 20])
     cq.commands.motion.waitforinposition(["X"])
@@ -763,12 +782,20 @@ def run_test_touch(
     cq.commands.motion.waitformotiondone([zaxis])
 
     cq.wait_for_empty()
-    return {
+    
+    
+    info = {
         "camnum": camnum,
         "test_touch_index": tt_index,
         "X": ttx, "Y": tty,
         "Z": z_touch,
     }
+
+    logger.info(f"Performed test touch #{info['test_touch_index']}", info)
+    
+    return info
+
+
 
 
 def cutlens_segments(controller, cq, path, spindle, zaxis, cuttype, safelift, feedspeed,
@@ -967,7 +994,7 @@ def cutlens_segments(controller, cq, path, spindle, zaxis, cuttype, safelift, fe
                 cq.commands.motion.movedelay(["U"], delay_time=500)
 
             cq.wait_for_empty()
-            print(f"Performed test touch #{info['test_touch_index']}", info)
+            #print(f"Performed test touch #{info['test_touch_index']}", info)
 
 
     cq.commands.motion.moveabsolute([zaxis], [0.0], [11])
