@@ -682,6 +682,7 @@ def run_test_touch(
     testtouchpath,
     zaxis,
     lines_per_test,
+    path,
     zshift = None,
     ttrot = None
 ):
@@ -697,7 +698,7 @@ def run_test_touch(
     rot = the rotation angel to do the test touch on 
 
     NOTE THAT THIS FUNCTION DOES NOT END THE QUEUE AS IT WORKS INSIDE OTHER FUNCTIONS. IMPORTANT WARNING TO STATE
-
+    path argument is path to where cut camming files are. i.e., /CCAT/180deg/ so we can log a test touch log file
     """
     camnum = int(camnum)
 
@@ -852,7 +853,7 @@ def cutlens_segments(controller, cq, path, spindle, zaxis, cuttype, safelift, fe
     if logger.hasHandlers():
         logger.handlers.clear()
 
-    fh = logging.FileHandler(log_path, "cutting.log")
+    fh = logging.FileHandler(log_path)
     ch = logging.StreamHandler()
 
     formatter = logging.Formatter("%(asctime)s - %(message)s")
@@ -955,7 +956,7 @@ def cutlens_segments(controller, cq, path, spindle, zaxis, cuttype, safelift, fe
             time.sleep(0.1)  
 
         # log for one line finished cutting
-        logger.info("{zaxis}: Finished cutting line #{camnum}")
+        logger.info(f"{zaxis}: Finished cutting line #{camnum}")
 
 
         # retract ZC and free table 1
@@ -982,8 +983,9 @@ def cutlens_segments(controller, cq, path, spindle, zaxis, cuttype, safelift, fe
                 testtouchpath=testtouchpath,
                 zaxis=zaxis,
                 lines_per_test=lines_per_test,
-                ttrot=ttrot,
-                zshift=zshift
+                path=path,
+                zshift=zshift,
+                ttrot=ttrot
             )
 
             if cut_rot is not None:
