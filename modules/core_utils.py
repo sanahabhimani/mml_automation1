@@ -726,7 +726,7 @@ def run_test_touch(
     if logger.hasHandlers():
         logger.handlers.clear()
 
-    fh = logging.FileHandler(log_path, "test_touch.log")
+    fh = logging.FileHandler(log_path, mode="a")
     ch = logging.StreamHandler()
 
     formatter = logging.Formatter("%(asctime)s - %(message)s")
@@ -886,8 +886,8 @@ def cutlens_segments(controller, cq, path, spindle, zaxis, cuttype, safelift, fe
             wrap_mode=a1.CammingWrapping.NoWrap,               
             table_offset=0.0)
         
-        SPEED_Y  = 28.0  # mm/s
-        SPEED_X  = 28.0   
+        SPEED_Y  = 30.0  # mm/s
+        SPEED_X  = 30.0   
         SPEED_Z = 12.0  # (down to zstart+2)
 
         SPEED_Z_TOUCH    = 0.1  # (final settle at zstart)
@@ -936,9 +936,11 @@ def cutlens_segments(controller, cq, path, spindle, zaxis, cuttype, safelift, fe
         # move at slower feedspeed [feedspeed of 5] for first 10 mm 
         # temporarily changed to 30 -- 9/24/25
         
-        cq.commands.motion.moveabsolute(["Y"], [ystart+30], [5])
+        cq.commands.motion.moveabsolute(["Y"], [ystart+40], [5])
         cq.commands.motion.waitforinposition(["Y"])
         cq.commands.motion.waitformotiondone(["Y"])
+
+
         
         cq.commands.motion.moveabsolute(["Y"], [yend], [feedspeed])
         cq.commands.motion.waitforinposition(["Y"])
