@@ -375,9 +375,9 @@ def cutcamming(controller, cq, path, zaxis, cuttype, safelift, feedspeed, floodp
         
         SPEED_Y  = 30.0  # mm/s
         SPEED_X  = 30.0   
-        SPEED_Z = 8.0  # (down to zstart+2)
+        SPEED_Z = 6.0  # (down to zstart+2)
         # TODO: PRIORITY 1 --- check if we want ZC touch speed to be slower
-        SPEED_Z_TOUCH    = 0.1  # (final settle at zstart)
+        SPEED_Z_TOUCH    = 0.01  # (final settle at zstart)
         
         # move to start positions, wait for in position
         cq.commands.motion.moveabsolute(["X", "Y"], [xstart, ystart], [SPEED_Y,  SPEED_X])
@@ -387,6 +387,10 @@ def cutcamming(controller, cq, path, zaxis, cuttype, safelift, feedspeed, floodp
 
         cq.commands.motion.moveabsolute([zaxis], [zstart + 2.0], [SPEED_Z])
         cq.commands.motion.waitforinposition([zaxis])
+        cq.commands.motion.waitformotiondone([zaxis])
+        cq.commands.motion.moveabsolute([zaxis], [zstart + 1.0 ], [0.1])
+        cq.commands.motion.waitforinposition([zaxis])
+        cq.commands.motion.waitformotiondone([zaxis])
         cq.commands.motion.moveabsolute([zaxis], [zstart], [SPEED_Z_TOUCH])
         cq.commands.motion.waitforinposition([zaxis])
         cq.commands.motion.waitformotiondone([zaxis])
@@ -416,7 +420,7 @@ def cutcamming(controller, cq, path, zaxis, cuttype, safelift, feedspeed, floodp
             time.sleep(0.1)  
 
         # when first cutting a line, for the first 10mm, go at a slower feedspeed, 5mm/s
-        cq.commands.motion.moveabsolute(["Y"], [ystart+10], [5.0])
+        cq.commands.motion.moveabsolute(["Y"], [ystart+20], [5.0])
         cq.commands.motion.waitforinposition(["Y"])
         cq.commands.motion.waitformotiondone(["Y"])
 
@@ -800,7 +804,7 @@ def run_test_touch(
 
 
 def cutlens_segments(controller, cq, path, spindle, zaxis, cuttype, safelift, feedspeed,
-               testtouchpath, lines_per_test, cut_rot=None, ttrot=None, zshift=None):
+               testtouchpath, lines_per_test, floodport, cut_rot=None, ttrot=None, zshift=None):
     """
     Cut lens segment mimic the cut alumina but instead of a wearshift file path it's given 
     a zcorrection file path 
@@ -1005,9 +1009,9 @@ def cutlens_segments(controller, cq, path, spindle, zaxis, cuttype, safelift, fe
     cq.commands.motion.waitforinposition([zaxis])
     cq.commands.motion.waitformotiondone([zaxis])
 
-    cq.commands.motion.moveabsolute("X", -275, 28)
-    cq.commands.motion.waitforinposition("X")
-    cq.commands.motion.waitformotiondone("X")
+    cq.commands.motion.moveabsolute(["X"], positions=[-275], speeds=[28])
+    cq.commands.motion.waitforinposition(["X"])
+    cq.commands.motion.waitformotiondone(["X"])
 
     # turn off flood cooling
     cq.commands.io.digitaloutputset(axis='X', output_num=floodport, value=0)
