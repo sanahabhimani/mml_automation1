@@ -21,6 +21,7 @@ import core_utils as cu
 # TODO: Config file for understanding flood cooling and spindle port is 
 # TODO: gonna come in so handy
 
+# NOTE: remember to run prepare_axes before this runs
 def yz_calibrate(controller, cq, xstart, ystart, zaxis, zstart, numcuts, pitch):
 
     cq.commands.motion.moveabsolute(["X", "Y"], [xstart, ystart], [20, 20])
