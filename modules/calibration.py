@@ -29,7 +29,7 @@ def yz_calibrate(controller, cq, xstart, ystart, zaxis, zstart, numcuts, pitch):
     cq.commands.motion.movedelay(["X", "Y"], delay_time = 1_000)
 
     # Z to z_touch + 2 @ z_approach_speed
-    cq.commands.motion.moveabsolute([zaxis], [zstart + 5.0], [10])
+    cq.commands.motion.moveabsolute([zaxis], [zstart + 5.0], [5])
     cq.commands.motion.waitforinposition([zaxis])
 
     for cut in range(numcuts):
@@ -56,6 +56,11 @@ def yz_calibrate(controller, cq, xstart, ystart, zaxis, zstart, numcuts, pitch):
         cq.commands.motion.moveabsolute(["X"], [nextx], [2])
         cq.commands.motion.waitforinposition(["X"])
         cq.commands.motion.waitformotiondone(["X"])
+
+        cq.wait_for_empty()
+
+    cq.commands.motion.moveabsolute([zaxis], [0], [10])
+    controller.runtime.commands.end_command_queue(cq)
 
 
 
