@@ -33,6 +33,7 @@ def yz_calibrate(controller, cq, xstart, ystart, zaxis, zstart, numcuts, pitch):
     cq.commands.motion.waitforinposition([zaxis])
 
     for cut in range(numcuts):
+        print(f'cutting cut number: {cut}')
 
         # Z to z_touch + 1 @ z_slow_speed
         cq.commands.motion.moveabsolute([zaxis], [z_touch + 2.0], [0.5])
