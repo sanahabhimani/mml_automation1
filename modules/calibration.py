@@ -18,12 +18,36 @@ from datetime import datetime
 import metalens
 import core_utils as cu
 
-# TODO: Config file for understanding flood cooling and spindle port is 
-# TODO: gonna come in so handy
+# TODO: Config file for understanding flood cooling and spindle port 
 
 # NOTE: remember to run prepare_axes before this runs
 def yz_calibrate(controller, cq, xstart, ystart, zaxis, zstart, numcuts, pitch):
+    """
+    Perform YZ calibration routine by executing a series of test touches
+    across X, stepping laterally by a fixed, overlapping pitch after each cut.
 
+    Parameters
+    ----------
+    controller:  object
+        Automation1 controller instance.
+    cq : object
+        Active CommandQueue instance used to queue and execute motion commands.
+    xstart : float
+        Starting X-coordinate for the calibration sequence.
+    ystart : float
+        Starting Y-coordinate for the calibration sequence.
+    zaxis : str
+        Name of the Z-axis being actuated (e.g., "ZD").
+    zstart : float
+        Safe Z height (mm) from which the approach motion begins.
+    numcuts : int
+        Number of calibration cuts to perform.
+    pitch : float
+        Lateral X-axis step size (mm) between successive cuts. The pitch should
+        be a little less than half of the blade kerf. I.e., 0.050 if the blade
+        kerf is 0.120mm.
+
+    """
     cq.commands.motion.moveabsolute(["X", "Y"], [xstart, ystart], [20, 20])
     cq.commands.motion.waitforinposition(["Y"])
     cq.commands.motion.movedelay(["X", "Y"], delay_time = 1_000)
