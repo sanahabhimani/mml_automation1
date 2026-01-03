@@ -32,7 +32,7 @@ def testtouch_metrology(
     if os.path.exists(outname):
         print("Metrology File Present, Stopping Motion")
         return
-        
+
     # Step size along X
     incX = 0.0 if numX <= 1 else (lengthX / (numX - 1))
     depth = Zstart - Zdrop
@@ -68,37 +68,35 @@ def testtouch_metrology(
         command_queue.commands.motion.waitformotiondone(["X", "Y", "ZA"])
         command_queue.commands.motion.waitforinposition(["X", "Y", "ZA"])
         command_queue.commands.motion.movedelay("ZA", 1_000)
-        
 
         # 2) Drop to depth and dwell so we can pause and query data points
-        
         command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[depth], speeds=[3.0])
         command_queue.commands.motion.waitforinposition(["ZA"])
         command_queue.commands.motion.waitformotiondone(["ZA"])
-       
+
         while True:
             pos = _get_program_pos(controller, axes=("X","Y","ZA"))
             if _within(pos['X'], x, 1e-3) and _within(pos['ZA'], depth, 1e-3):
                  # dwell in position
                  command_queue.commands.motion.movedelay(["X", "Y", "ZA"], 1_000)
-                 
-                 ser.write(b"RMD0\r\n") 
+
+                 ser.write(b"RMD0\r\n")
                  sensor = ser.read(2048).decode("utf-8", errors="ignore").strip()
                  line = f"{pos['X']}, {pos['Y']}, {pos['ZA']}, {sensor}\n"
                  f.write(line)
                  f.flush()
                  print(f"{pos['X']}, {pos['Y']}, {pos['ZA']}, {sensor}")
-                 break   
+                 break
             else:
-                time.sleep(0.1)  
-                
+                time.sleep(0.1)
+
         command_queue.commands.motion.movedelay("ZA", 500)
         command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[Zstart], speeds=[8.0])
         command_queue.commands.motion.waitformotiondone(["ZA"])
         command_queue.commands.motion.waitforinposition(["ZA"])
         command_queue.commands.motion.movedelay("X", 1_000)
         command_queue.wait_for_empty()  # ensure retract finished before next X
-        
+
     # Park and end
     command_queue.commands.motion.movedelay("ZA", 500)
     command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[0.0], speeds=[8.0])
@@ -109,7 +107,7 @@ def testtouch_metrology(
     controller.runtime.commands.end_command_queue(command_queue)
     f.close()
     ser.close()
- 
+
 
 def dressing_metrology(
     command_queue, controller,
@@ -129,7 +127,7 @@ def dressing_metrology(
     if os.path.exists(outname):
         print("Metrology File Present, Stopping Motion")
         return
-    
+
     # Step size along X
     incX = 0.0 if numX <= 1 else (lengthX / (numX - 1))
     incY = 0.0 if numY <= 1 else (lengthY / (numY - 1))
@@ -165,22 +163,21 @@ def dressing_metrology(
         command_queue.commands.motion.waitformotiondone(["X", "ZA"])
         command_queue.commands.motion.waitforinposition(["X", "ZA"])
         command_queue.commands.motion.movedelay("ZA", 500)
-        
+
         for iy in range(numY):
             y = Ystart + incY * iy
-            
+
             # 2) Drop to depth and dwell so we can pause and query data points
             command_queue.commands.motion.moveabsolute(axes=["Y"], positions=[y], speeds=[10.0])
             command_queue.commands.motion.waitforinposition(["Y"])
             command_queue.commands.motion.waitformotiondone(["Y"])
             command_queue.commands.motion.movedelay("Y", 250) # can change to 1s
 
-            
+
             command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[depth], speeds=[3.0])
             command_queue.commands.motion.waitforinposition(["ZA"])
             command_queue.commands.motion.waitformotiondone(["ZA"])
 
-            
             while True:
                 pos = _get_program_pos(controller, axes=("X","Y","ZA"))
                 if _within(pos['X'], x, 1e-3) and _within(pos['Y'], y, 1e-3) and _within(pos['ZA'], depth, 1e-3): 
@@ -191,17 +188,16 @@ def dressing_metrology(
                     f.write(line)
                     f.flush()
                     print(f"{pos['ZA']}, {sensor}")
-                    #time.sleep(2)
-                    break   # exit while, go to next X
+                    break
                 else:
                     time.sleep(0.1)  # tiny delay before re-check
-                    
+ 
             command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[Zstart], speeds=[7.0])
             command_queue.commands.motion.waitformotiondone(["ZA"])
             command_queue.commands.motion.waitforinposition(["ZA"])
             command_queue.commands.motion.movedelay(["X", "Y"], 500)
             command_queue.wait_for_empty()  # ensure retract finished before next X
-        
+
     # Park and end
     command_queue.commands.motion.movedelay("ZA", 500)
     command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[0.0], speeds=[8.0])
@@ -392,8 +388,6 @@ def flange_metrology(
         command_queue.commands.motion.waitforinposition(["ZA"])
         command_queue.commands.motion.waitformotiondone(["ZA"])
 
-        
-        
         # while True pose check (like dressing_metrology)
         while True:
             pos = _get_program_pos(controller, axes=("X","Y","ZA"))
@@ -505,7 +499,6 @@ def plane_metrology(
             command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[depth], speeds=[3.0])
             command_queue.commands.motion.waitforinposition(["ZA"])
 
-            
             while True:
                 pos = _get_program_pos(controller, axes=("X","Y","ZA"))
                 if (_within(pos['X'], xval, 1e-3) and
