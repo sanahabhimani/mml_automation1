@@ -57,13 +57,19 @@ def enable_zaxes(controller, cq, z_axes):
     """
     Enable X, Y, and one or more Z axes.
 
-    Args
-    ----
-    controller : a1.Controller
-    cq         : Command queue
-    z_axes     : str or list of str  ("ZC" or ["ZA", "ZB"])
+    Parameters
+    ----------
+    controller : object
+        Automation1 controller instance
+    cq : object
+        Command queue to enqueue motion/ IO commands
+    z_axes :  str or list(str)
+        Example: 'ZC' or ['ZA', 'ZB']
 
-    Note: controller and command queue must already be instantiated.
+    Notes
+    -----
+    Controller and command queue must already be instantiated.
+
     """
     print("Queue was initiated on task:", cq.task_index, "capacity:", cq.command_capacity)
 
@@ -81,26 +87,37 @@ def enable_zaxes(controller, cq, z_axes):
 
 
 def prepare_zaxes(controller, cq, z_axes, spindle_ports, flood_ports, active_z,
-                  z_position=0, z_speed=20, delay_ms=11_000, io_axis='X'):
+                  z_position=0, z_speed=25, delay_ms=11_000, io_axis='X'):
     """
-    Prepare Z axes for cutting: move all Z axes to 0, reset flood cooling status, turn on all spindles,
+    Prepare Z axes for cutting.
+
+    Move all Z axes to 0, reset flood cooling status, turn on all spindles,
     and activate flood cooling only for the currently active Z.
 
-    Args
-    ----
-    controller    : a1.Controller
-    cq            : Command queue
-    z_axes        : list of str       e.g., ["ZB", "ZC", "ZD"]
-    spindle_ports : list of int       spindle DOs (must match z_axes)
-    flood_ports   : list of int       flood DOs (must match z_axes)
-    active_z      : str               which Z axis should have its flood cooling ON
-    z_position    : float             target Z position (mm) for all Zs
-    z_speed       : float             move speed (mm/s) for all Zs
-    delay_ms      : int               dwell time (ms)
-    io_axis       : str               I/O axis context (usually "X")
+    Parameters
+    ----------
+    controller : object
+        Automation1 controller instance
+    cq : object
+        Command queue object to enqueue motion/IO commands
+    z_axes : list[str]
+        e.g., ["ZB", "ZC", "ZD"]
+    spindle_ports : list[int]
+        Spindle digital outputs (they must map to z_axes)
+    flood_ports : list[int]
+        Flood cooling digital outputs (must match z_axes)
+    active_z : str
+        Z axis that will be commencing the cuts, therefore should
+        have its flood cooling enabled
+    z_position : float
+        Target Z position (mm) for all Zs. Default is 0.
+    z_speed : float
+        move speed (mm/s) for all Zs. Default is 25.
+    delay_ms : int
+        Dwell time (ms). Default is 11 seconds.
+    io_axis : str
+        I/O axis context (usually "X")
 
-    Note:
-    This includes some dwell times for turning flood cooling off and on in case of lag in general.
     """
     if isinstance(z_axes, str):
         raise ValueError("z_axes must be a list when using multi-axis prepare")
@@ -801,7 +818,7 @@ def run_test_touch(
     cq.commands.motion.movedelay(['ZC'], delay_time=1_000)
 
     # X out
-    cq.commands.motion.moveabsolute(["X"], [-275], [30]) 
+    cq.commands.motion.moveabsolute(["X"], [-275], [30])
     cq.commands.motion.waitforinposition(["X"])
     cq.commands.motion.waitformotiondone([zaxis])
 
