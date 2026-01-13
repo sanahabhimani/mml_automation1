@@ -356,7 +356,6 @@ def flange_metrology(
 
     R = circlediam / 2.0
     depth = Zstart - Zdrop
-    print('depth', depth)
 
     # Safe starting pose
     command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[0], speeds=[8.0])
