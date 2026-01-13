@@ -2,6 +2,7 @@ import automation1 as a1
 import time
 import numpy as np
 import matplotlib.pyplot as plt
+import math
 
 import os
 import serial
@@ -218,8 +219,7 @@ def lens_metrology(
     command_queue, controller,
     circlediam, xstep, ystep,
     Xcenter, Ycenter,
-    Zstart, moveheight,
-    outname, comport="COM4",
+    Zstart,outname, comport="COM4",
     dwell_ms_at_depth=500  # ms, mirrors Aerobasic lifterSettleTime
 ):
     """
@@ -240,12 +240,10 @@ def lens_metrology(
         command_queue.commands.motion.enable(ax)
 
     # Safe starting pose
-    command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[Zstart], speeds=[8.0])
+    command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[0], speeds=[10.0])
     command_queue.commands.motion.waitforinposition(["ZA"])
     command_queue.commands.motion.moveabsolute(axes=["X","Y"], positions=[Xcenter, Ycenter], speeds=[15.0,15.0])
     command_queue.commands.motion.waitforinposition(["X","Y"])
-    command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[moveheight], speeds=[8.0])
-    command_queue.commands.motion.waitforinposition(["ZA"])
     command_queue.wait_for_empty()
 
     # Open gauge + file
@@ -272,22 +270,30 @@ def lens_metrology(
         # --- Y loop ---
         while yval < ystop:  # "<" like Aerobasic
             # Conditional zdrop
+            # TODO: the 29 and the 260 can be parameters that change. the 18 can be constant
+            # TODO: right now, hardcoded in 
             r_eff = 2 * math.sqrt((xval - Xcenter)**2 + (yval - Ycenter)**2)
-            zdrop = 15.0 if r_eff < 260.0 else 20.0
-            depth = moveheight - zdrop
+            zdrop = 18.0 if r_eff < 260.0 else 30.0
+            depth = Zstart - zdrop
 
-            print(f"({xval:.3f}, {yval:.3f}) zdrop={zdrop}")
+            #print(f"({xval:.3f}, {yval:.3f}) zdrop={zdrop}")
 
             # Move XY
             command_queue.commands.motion.moveabsolute(
-                axes=["X","Y"], positions=[xval, yval], speeds=[10.0,6.0]
+                axes=["X","Y"], positions=[xval, yval], speeds=[25.0,25.0]
             )
             command_queue.commands.motion.waitforinposition(["X","Y"])
-            command_queue.commands.motion.movedelay(["X","Y"], 2000)
+            command_queue.commands.motion.movedelay(["X","Y"], 200)
+
+            # Drop to Zstart safe position
+            command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[Zstart], speeds=[7.0])
+            command_queue.commands.motion.waitforinposition(["ZA"])
+            command_queue.commands.motion.waitformotiondone(["ZA"])
 
             # Drop to depth
             command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[depth], speeds=[3.0])
             command_queue.commands.motion.waitforinposition(["ZA"])
+            command_queue.commands.motion.waitformotiondone(["ZA"])
 
             # dwell at depth
             command_queue.commands.motion.movedelay(["X","Y","ZA"], dwell_ms_at_depth)
@@ -302,7 +308,7 @@ def lens_metrology(
                 if (_within(pos['X'], xval, 1e-3) and
                     _within(pos['Y'], yval, 1e-3) and
                     _within(pos['ZA'], depth, 1e-3)):
-                    command_queue.commands.motion.movedelay(["X", "Y", "ZA"], 500)
+                    command_queue.commands.motion.movedelay(["X", "Y", "ZA"], 1500)
                     ser.write(b"RMD0\r\n")
                     sensor = ser.read(2048).decode("utf-8", errors="ignore").strip()
                     line = f"{pos['X']}, {pos['Y']}, {pos['ZA']}, {sensor}\n"
@@ -314,9 +320,9 @@ def lens_metrology(
                     time.sleep(0.1)
 
             # Retract
-            command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[moveheight], speeds=[7.0])
+            command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[Zstart], speeds=[7.0])
             command_queue.commands.motion.waitforinposition(["ZA"])
-            command_queue.commands.motion.movedelay(["X","Y"], 3000)
+            command_queue.commands.motion.movedelay(["X","Y"], 500)
             command_queue.wait_for_empty()
 
             yval += ystep
@@ -336,10 +342,8 @@ def lens_metrology(
 def flange_metrology(
     command_queue, controller,
     numpoints, circlediam, Xcenter, Ycenter,
-    Zstart, moveheight, Zdrop,
-    outname, comport="COM4",
-    dwell_ms_at_depth=500  # ms, mirrors lifterSettleTime in Aerobasic
-):
+    Zstart, Zdrop,
+    outname, comport="COM4"):
     """
     Flange metrology: evenly spaced points around a circle.
     Mirrors Aerobasic structure, but uses dressing_metrology-style sequencing.
@@ -351,19 +355,14 @@ def flange_metrology(
         return
 
     R = circlediam / 2.0
-    depth = moveheight - Zdrop
-
-    # Enable axes
-    for ax in ["X", "Y", "ZA"]:
-        command_queue.commands.motion.enable(ax)
+    depth = Zstart - Zdrop
+    print('depth', depth)
 
     # Safe starting pose
-    command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[Zstart], speeds=[8.0])
+    command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[0], speeds=[8.0])
     command_queue.commands.motion.waitforinposition(["ZA"])
-    command_queue.commands.motion.moveabsolute(axes=["X","Y"], positions=[Xcenter, Ycenter], speeds=[15.0, 15.0])
+    command_queue.commands.motion.moveabsolute(axes=["X","Y"], positions=[Xcenter, Ycenter], speeds=[25.0, 25.0])
     command_queue.commands.motion.waitforinposition(["X","Y"])
-    command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[moveheight], speeds=[8.0])
-    command_queue.commands.motion.waitforinposition(["ZA"])
     command_queue.wait_for_empty()
 
     # Open gauge + file
@@ -380,12 +379,15 @@ def flange_metrology(
 
         print(f"Point {pointnum}: {xval:.3f}, {yval:.3f}")
 
-        # Move XY @ moveheight
-        command_queue.commands.motion.moveabsolute(
-            axes=["X","Y","ZA"], positions=[xval, yval, moveheight], speeds=[10.0, 10.0, 6.0]
-        )
-        command_queue.commands.motion.waitforinposition(["X","Y","ZA"])
-        command_queue.commands.motion.movedelay(["X","Y"], 2000)
+        # Move XY 
+        command_queue.commands.motion.moveabsolute(axes=["X","Y"], positions=[xval, yval], speeds=[25.0, 25.0])
+        command_queue.commands.motion.waitforinposition(["X","Y"])
+        command_queue.commands.motion.movedelay(["X","Y"], 200)
+
+        # Drop to Zstart
+        command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[Zstart], speeds=[8.0])
+        command_queue.commands.motion.waitforinposition(["ZA"])
+        command_queue.commands.motion.waitformotiondone(["ZA"])
 
         # Drop to depth
         command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[depth], speeds=[3.0])
@@ -394,7 +396,7 @@ def flange_metrology(
 
         
         
-        # while True pose check (like dressing_metrology)
+        # while True check (like dressing_metrology)
         while True:
             pos = _get_program_pos(controller, axes=("X","Y","ZA"))
             if (_within(pos['X'], xval, 1e-3) and
@@ -402,7 +404,7 @@ def flange_metrology(
                 _within(pos['ZA'], depth, 1e-3)):
 
                 # dwell at depth
-                command_queue.commands.motion.movedelay(["X","Y","ZA"], 500)
+                command_queue.commands.motion.movedelay(["X","Y","ZA"], 1000)
 
                 # read probe 
                 ser.write(b"RMD0\r\n")
@@ -418,14 +420,14 @@ def flange_metrology(
                 time.sleep(0.1)
 
         # Retract
-        command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[moveheight], speeds=[7.0])
+        command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[Zstart], speeds=[7.0])
         command_queue.commands.motion.waitforinposition(["ZA"])
-        command_queue.commands.motion.movedelay(["X","Y"], 3000)
+        command_queue.commands.motion.movedelay(["X","Y"], 300)
         command_queue.wait_for_empty()
 
     # Park and end
     command_queue.commands.motion.movedelay("ZA", 1000)
-    command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[Zstart], speeds=[8.0])
+    command_queue.commands.motion.moveabsolute(axes=["ZA"], positions=[0], speeds=[8.0])
     command_queue.commands.motion.waitforinposition(["ZA"])
     command_queue.wait_for_empty()
     controller.runtime.commands.end_command_queue(command_queue)
