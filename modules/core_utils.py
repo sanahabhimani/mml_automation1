@@ -357,7 +357,7 @@ def cutcamming(controller, cq, path, zaxis, cuttype, safelift, feedspeed, floodp
     campaths = iter_cam_paths_from_master(master_path=masterpath, base_path=path, cuttype=cuttype)
 
     if rot is not None:
-        rot = int(rot)
+        rot = float(rot)
         cq.commands.motion.moveabsolute(["U"], [rot], [20])
         cq.commands.motion.waitforinposition(["U"])
         cq.commands.motion.waitformotiondone(["U"])
@@ -409,7 +409,7 @@ def cutcamming(controller, cq, path, zaxis, cuttype, safelift, feedspeed, floodp
         SPEED_X  = 30.0
         SPEED_Z = 6.0  # (down to zstart+2)
         # TODO: PRIORITY 1 --- check if we want ZC touch speed to be slower
-        SPEED_Z_TOUCH    = 0.05  # (final settle at zstart)
+        SPEED_Z_TOUCH    = 0.1 #0.05  # (final settle at zstart)
 
         # move to start positions, wait for in position
         cq.commands.motion.moveabsolute(["X", "Y"], [xstart, ystart], [SPEED_Y,  SPEED_X])
@@ -875,7 +875,7 @@ def cutlens_segments(controller, cq, path, spindle, zaxis, cuttype, safelift, fe
 
     cq.resume()
     if cut_rot is not None:
-        cut_rot = int(cut_rot)
+        cut_rot = float(cut_rot)
         cq.commands.motion.moveabsolute(["U"], [cut_rot], [20])
         cq.commands.motion.waitforinposition(["U"])
         cq.commands.motion.waitformotiondone(["U"])
@@ -1025,7 +1025,7 @@ def cutlens_segments(controller, cq, path, spindle, zaxis, cuttype, safelift, fe
             )
 
             if cut_rot is not None:
-                cut_rot = int(cut_rot)
+                cut_rot = float(cut_rot)
                 cq.commands.motion.moveabsolute(axes=["U"], positions=[cut_rot], speeds=[20])
                 cq.commands.motion.waitforinposition(["U"])
                 cq.commands.motion.waitformotiondone(["U"])
@@ -1166,7 +1166,7 @@ def testtouch_fromfile(controller, cq, path, zaxis, floodport, rot=None):
 
     cq.pause()
     # now move in zaxis to test touch location
-    cq.commands.motion.moveabsolute(axes=[zaxis], positions=[z+20], speeds=[6])
+    cq.commands.motion.moveabsolute(axes=[zaxis], positions=[z+15], speeds=[6])
     cq.commands.motion.waitforinposition([zaxis])
     cq.commands.motion.waitformotiondone([zaxis])
     cq.resume()
