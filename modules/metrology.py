@@ -20,7 +20,7 @@ def testtouch_metrology(
     command_queue, controller,
     numX, lengthX,
     Xstart, Ystart, Zstart, Zdrop,
-    outname, dwell_ms_at_depth=0, comport="COM4"):
+    outname, comport="COM4"):
     """
     Y is fixed. For each X:
       - Move to (X, Ystart, Zstart), wait
