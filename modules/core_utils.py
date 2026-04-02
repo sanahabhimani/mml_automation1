@@ -239,7 +239,7 @@ def load_master_table(master_path):
     # comment='#' lets you keep notes in the file safely
     df = pd.read_csv(
         master_path,
-        sep='\s+',
+        sep=r'\s+',
         header=None,
         comment="#",
         dtype={0: str},      # preserve '0007'
