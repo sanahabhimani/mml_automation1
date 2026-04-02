@@ -11,6 +11,7 @@ sys.path.append('C:\\Users\\UNIVERSITY\\git\\')
 sys.path.append('C:\\Users\\UNIVERSITY\\git\\metalens\\')
 import metalens
 from metalens import core_utils as cu
+from test_touch_vision import perform_test_touch_vision_cycle
 
 
 def check_io_status(controller, port, name, axis='X', execution_task_index=1):
@@ -831,13 +832,13 @@ def run_test_touch(
         "Z": z_touch,
     }
 
-    logger.info(f"Performed test touch #{info['test_touch_index']}", info)
+    logger.info(f"Performed test touch #{info['test_touch_index']} | {info}")
 
     return info
 
 
 def cutlens_segments(controller, cq, path, spindle, zaxis, cuttype, safelift, feedspeed,
-               testtouchpath, lines_per_test, floodport, cut_rot=None, ttrot=None, zshift=None):
+               testtouchpath, lines_per_test, floodport, cut_rot=None, ttrot=None, zshift=None, vision_config=None):
     """
     Cut lens segment mimic the cut alumina but instead of a wearshift file path it's given
     a zcorrection file path
@@ -1024,6 +1025,19 @@ def cutlens_segments(controller, cq, path, spindle, zaxis, cuttype, safelift, fe
                 ttrot=ttrot
             )
 
+            vision_result = None
+            if vision_config is not None:
+                vision_result = perform_test_touch_vision_cycle(
+                    cq=cq,
+                    path=path,
+                    spindle=spindle,
+                    cuttype=cuttype,
+                    touch_info=info,
+                    vision_config=vision_config,
+                )
+
+                print("test touch vision result:", vision_result)
+
             if cut_rot is not None:
                 cut_rot = float(cut_rot)
                 cq.commands.motion.moveabsolute(axes=["U"], positions=[cut_rot], speeds=[20])
@@ -1032,7 +1046,6 @@ def cutlens_segments(controller, cq, path, spindle, zaxis, cuttype, safelift, fe
                 cq.commands.motion.movedelay(["U"], delay_time=500)
 
             cq.wait_for_empty()
-            #print(f"Performed test touch #{info['test_touch_index']}", info)
 
 
     cq.commands.motion.moveabsolute([zaxis], [0.0], [11])
