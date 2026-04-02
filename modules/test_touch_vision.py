@@ -1,7 +1,7 @@
 from pathlib import Path
 import logging
 
-#from dinolite import DinoLiteSession, build_testtouch_image_name
+from dinolite import DinoLiteSession, build_testtouch_image_name
 from unet_predictor import load_unet_weights, predict_unet_mask
 from delta_regressor_prediction import (
     load_delta_regressor,
