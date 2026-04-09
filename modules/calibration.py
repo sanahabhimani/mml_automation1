@@ -67,7 +67,7 @@ def yz_calibrate(controller, cq, xstart, ystart, zaxis, ztouch, numcuts, pitch):
         cq.commands.motion.moveabsolute([zaxis], [ztouch+1], [0.1])
         cq.commands.motion.waitforinposition([zaxis])
 
-        cq.commands.motion.moveabsolute([zaxis], [ztouch], [0.01])
+        cq.commands.motion.moveabsolute([zaxis], [ztouch], [0.1])
         cq.commands.motion.waitforinposition([zaxis])
 
         # queue-based hold at depth (ms)
