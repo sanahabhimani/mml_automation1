@@ -60,14 +60,14 @@ def yz_calibrate(controller, cq, xstart, ystart, zaxis, ztouch, numcuts, pitch):
         print(f'cutting cut number: {cut}')
 
         # Z to z_touch + 1 @ z_slow_speed
-        cq.commands.motion.moveabsolute([zaxis], [z_touch + 2.0], [0.5])
+        cq.commands.motion.moveabsolute([zaxis], [ztouch + 2.0], [0.5])
         cq.commands.motion.waitforinposition([zaxis])
 
         # Z to z_touch @ z_final_speed
-        cq.commands.motion.moveabsolute([zaxis], [z_touch+1], [0.1])
+        cq.commands.motion.moveabsolute([zaxis], [ztouch+1], [0.1])
         cq.commands.motion.waitforinposition([zaxis])
 
-        cq.commands.motion.moveabsolute([zaxis], [z_touch], [0.01])
+        cq.commands.motion.moveabsolute([zaxis], [ztouch], [0.01])
         cq.commands.motion.waitforinposition([zaxis])
 
         # queue-based hold at depth (ms)
