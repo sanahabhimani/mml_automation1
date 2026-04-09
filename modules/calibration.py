@@ -21,7 +21,7 @@ import core_utils as cu
 # TODO: Config file for understanding flood cooling and spindle port 
 
 # NOTE: remember to run prepare_axes before this runs
-def yz_calibrate(controller, cq, xstart, ystart, zaxis, zstart, numcuts, pitch):
+def yz_calibrate(controller, cq, xstart, ystart, zaxis, ztouch, numcuts, pitch):
     """
     Perform YZ calibration routine by executing a series of test touches
     across X, stepping laterally by a fixed, overlapping pitch after each cut.
@@ -38,8 +38,8 @@ def yz_calibrate(controller, cq, xstart, ystart, zaxis, zstart, numcuts, pitch):
         Starting Y-coordinate for the calibration sequence.
     zaxis : str
         Name of the Z-axis being actuated (e.g., "ZD").
-    zstart : float
-        Safe Z height (mm) from which the approach motion begins.
+    ztouch : float
+        The point at which the spindle touches the test wafer at the depth the user desires. This is the Z height (mm) from which the approach motion begins.
     numcuts : int
         Number of calibration cuts to perform.
     pitch : float
@@ -53,7 +53,7 @@ def yz_calibrate(controller, cq, xstart, ystart, zaxis, zstart, numcuts, pitch):
     cq.commands.motion.movedelay(["X", "Y"], delay_time = 1_000)
 
     # Z to z_touch + 2 @ z_approach_speed
-    cq.commands.motion.moveabsolute([zaxis], [zstart + 5.0], [5])
+    cq.commands.motion.moveabsolute([zaxis], [ztouch + 5.0], [5])
     cq.commands.motion.waitforinposition([zaxis])
 
     for cut in range(numcuts):
@@ -74,7 +74,7 @@ def yz_calibrate(controller, cq, xstart, ystart, zaxis, zstart, numcuts, pitch):
         cq.commands.motion.movedelay([zaxis], delay_time=500)
 
         # then lift up 5mm above 
-        cq.commands.motion.moveabsolute([zaxis], [zstart + 5.0], [10])
+        cq.commands.motion.moveabsolute([zaxis], [ztouch + 5.0], [10])
         cq.commands.motion.waitforinposition([zaxis])
 
         nextx = xstart + ((cut + 1) * pitch)
