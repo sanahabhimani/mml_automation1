@@ -1,4 +1,4 @@
-# mml-automation1
+# mml_automation1
 
 
 Python-based automation tools for lens and filter fabrication in the McMahon Metamaterials Lab
