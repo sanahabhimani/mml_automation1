@@ -6,6 +6,8 @@ using Aerotech Automation1 API.
 
 The package is developed as part of the migration of the lab’s fabrication systems from Aerotech A3200 software to Automation1 Python API. 
 
+`mml_automation1` is an independent Python package for Metamaterials Lab automation workflows built on top of Aerotech’s Automation1 Python API. It does not include or redistribute Aerotech Automation1 software, libraries, firmware, documentation, or license keys. Users must obtain and install the official Automation1-MDK / Automation1 Python API from Aerotech separately and must comply with Aerotech’s licensing terms.
+
 ## Overview
 
 `mml_automation1` provides the machine-control and metrology workflows used to
