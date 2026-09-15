@@ -7,11 +7,12 @@ import pandas as pd
 import re
 
 import sys
-sys.path.append('C:\\Users\\UNIVERSITY\\git\\')
-sys.path.append('C:\\Users\\UNIVERSITY\\git\\metalens\\')
+sys.path.append('C:\\Users\\UNIVERSITY OF CHICAG\\git\\')
+sys.path.append('C:\\Users\\UNIVERSITY OF CHICAG\\git\\metalens\\')
 import metalens
 from metalens import core_utils as cu
-from test_touch_vision import perform_test_touch_vision_cycle
+#import test_touch_vision
+#from test_touch_vision import perform_test_touch_vision_cycle
 
 
 def check_io_status(controller, port, name, axis='X', execution_task_index=1):
@@ -416,19 +417,20 @@ def cutcamming(controller, cq, path, zaxis, cuttype, safelift, feedspeed, floodp
         cq.commands.motion.moveabsolute(["X", "Y"], [xstart, ystart], [SPEED_Y,  SPEED_X])
         cq.commands.motion.waitforinposition(["Y"])
         cq.commands.motion.waitforinposition(["X"])
-        cq.commands.motion.movedelay(["X", "Y"], delay_time=400)
+        cq.commands.motion.movedelay(["X", "Y"], delay_time=100)
 
 
         cq.commands.motion.moveabsolute([zaxis], [zstart + 2.0], [SPEED_Z])
         cq.commands.motion.waitforinposition([zaxis])
-        cq.commands.motion.moveabsolute([zaxis], [zstart+1], [1])
+        cq.commands.motion.waitformotiondone([zaxis])
+        cq.commands.motion.moveabsolute([zaxis], [zstart+0.5], [1])
         cq.commands.motion.waitforinposition([zaxis])
         cq.commands.motion.waitformotiondone([zaxis])
 
         cq.commands.motion.moveabsolute([zaxis], [zstart], [SPEED_Z_TOUCH])
         cq.commands.motion.waitforinposition([zaxis])
         cq.commands.motion.waitformotiondone([zaxis])
-        cq.commands.motion.movedelay([zaxis], delay_time=500)
+        cq.commands.motion.movedelay([zaxis], delay_time=100)
         cq.wait_for_empty()
 
 
@@ -456,15 +458,15 @@ def cutcamming(controller, cq, path, zaxis, cuttype, safelift, feedspeed, floodp
             time.sleep(0.1)  
 
         # when first cutting a line, for the first 10mm, go at a slower feedspeed, 5mm/s
-        cq.commands.motion.moveabsolute(["Y"], [ystart+17], [5.0])
+        cq.commands.motion.moveabsolute(["Y"], [ystart+3], [3.0])
+        cq.commands.motion.moveabsolute(["Y"], [ystart+6], [6.0])
         cq.commands.motion.waitforinposition(["Y"])
-        cq.commands.motion.waitformotiondone(["Y"])
 
         # proceed to cutting the rest of the cut at assigned feedspeed
         cq.commands.motion.moveabsolute(["Y"], [yend], [feedspeed])
         cq.commands.motion.waitforinposition(["Y"])
         cq.commands.motion.waitformotiondone(["Y"])
-        cq.commands.motion.movedelay(["Y"], delay_time=1_000)
+        cq.commands.motion.movedelay(["Y"], delay_time=100)
 
         am.cammingoff(follower_axis=zaxis)
 
@@ -483,7 +485,7 @@ def cutcamming(controller, cq, path, zaxis, cuttype, safelift, feedspeed, floodp
         cq.commands.motion.waitforinposition([zaxis])
         cq.commands.motion.waitformotiondone([zaxis])
         cq.commands.advanced_motion.cammingfreetable(1)
-        cq.commands.motion.movedelay([zaxis], delay_time=1_000)
+        cq.commands.motion.movedelay([zaxis], delay_time=100)
 
         # drain the queue before we are ready to cut the next line
         cq.wait_for_empty()
@@ -505,7 +507,7 @@ def cutcamming(controller, cq, path, zaxis, cuttype, safelift, feedspeed, floodp
 
 
 def cutalumina(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
-               testtouchpath, wearshiftpath, lines_per_test):
+               testtouchpath, wearshiftpath, lines_per_test, rot=None,):
     path = Path(path)
     assert path.exists(), f"Base path not found: {path}"
 
@@ -518,6 +520,33 @@ def cutalumina(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
 
     cu._check_lockfile(path)
     campaths = iter_cam_paths_from_master(master_path=masterpath, base_path=path, cuttype=cuttype)
+
+
+    if rot is not None:
+        rot = float(rot)
+        cq.commands.motion.moveabsolute(["U"], [rot], [20])
+        cq.commands.motion.waitforinposition(["U"])
+        cq.commands.motion.waitformotiondone(["U"])
+        cq.commands.motion.movedelay(["U"], delay_time=1_000)
+
+     # Set up logging
+    log_path = path / "cutting.log"
+    logger = logging.getLogger("cut_logger")
+    logger.setLevel(logging.INFO)
+
+    # clear old handlers so you don't get duplicates
+    if logger.hasHandlers():
+        logger.handlers.clear()
+
+    fh = logging.FileHandler(log_path)
+    ch = logging.StreamHandler()
+
+    formatter = logging.Formatter("%(asctime)s - %(message)s")
+    fh.setFormatter(formatter)
+    ch.setFormatter(formatter)
+
+    logger.addHandler(fh)
+    logger.addHandler(ch)
 
     am = cq.commands.advanced_motion
     for campath in campaths[0:4]:
@@ -1207,7 +1236,7 @@ def testtouch_fromfile(controller, cq, path, zaxis, floodport, rot=None):
 
 
     cq.pause()
-    cq.commands.motion.moveabsolute(axes=[zaxis], positions=[z+0.5], speeds=[0.1])
+    cq.commands.motion.moveabsolute(axes=[zaxis], positions=[z+0.2], speeds=[0.1])
     cq.commands.motion.waitforinposition([zaxis])
     cq.commands.motion.waitformotiondone([zaxis])
     cq.resume()
