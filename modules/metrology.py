@@ -219,7 +219,7 @@ def lens_metrology(
     command_queue, controller,
     circlediam, xstep, ystep,
     Xcenter, Ycenter,
-    Zstart,outname, comport="COM4",
+    Zstart, Zdrop, outname, comport,
     dwell_ms_at_depth=500  # ms, mirrors Aerobasic lifterSettleTime
 ):
     """
@@ -232,7 +232,7 @@ def lens_metrology(
     if os.path.exists(outname):
         print("Metrology File Present, stopping to avoid overwrite")
         return
-
+    
     R = circlediam / 2.0
 
     # Enable axes
@@ -273,7 +273,7 @@ def lens_metrology(
             # TODO: the 29 and the 260 can be parameters that change. the 18 can be constant
             # TODO: right now, hardcoded in 
             r_eff = 2 * math.sqrt((xval - Xcenter)**2 + (yval - Ycenter)**2)
-            zdrop = 18.0 if r_eff < 260.0 else 30.0
+            zdrop = 25 if r_eff < 260.0 else Zdrop
             depth = Zstart - zdrop
 
             #print(f"({xval:.3f}, {yval:.3f}) zdrop={zdrop}")
