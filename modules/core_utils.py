@@ -549,7 +549,8 @@ def cutalumina(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
     logger.addHandler(ch)
 
     am = cq.commands.advanced_motion
-    for campath in campaths[0:4]:
+    for campath in campaths:
+        print('file path loc', campath)
         assert campath.exists(), f"Campath not found: {campath}"
 
         camnum = Path(campath).stem[-4:]
@@ -558,20 +559,14 @@ def cutalumina(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
 
         # get coordinates, including original non-wear shifted z coordinate
         yvals, zvals = get_cutcam_coords(campath)
-        xstart, ystart, zstart_raw, yend = read_startend_coords(master_path=masterpath, camnum=camnum)
-
-        # apply wear-shift to camming z-values and zstart value
-        zvals_shifted = [z + wearshift for z in zvals]
-        zstart = zstart_raw + wearshift
-        print(zstart)
-
+        xstart, ystart, zstart, yend = read_startend_coords(master_path=masterpath, camnum=camnum)
 
         # now set up aerotech camming conditions
         am.cammingfreetable(1)
         am.cammingloadtablefromarray(
             table_num=1,
             leader_values=yvals,
-            follower_values=zvals_shifted,
+            follower_values=zvals,
             num_values=len(yvals),
             units_mode=a1.CammingUnits.Primary,
             interpolation_mode=a1.CammingInterpolation.Linear,
@@ -589,23 +584,20 @@ def cutalumina(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
         cq.commands.motion.moveabsolute(["X", "Y"], [xstart, ystart], [SPEED_Y,  SPEED_X])
         cq.commands.motion.waitforinposition(["Y"])
         cq.commands.motion.waitforinposition(["X"])
-        cq.commands.motion.movedelay(["X", "Y"], delay_time=1_500)
+        cq.commands.motion.movedelay(["X", "Y"], delay_time=100)
 
         cq.commands.motion.moveabsolute([zaxis], [zstart + 2.0], [SPEED_Z])
         cq.commands.motion.waitforinposition([zaxis])
-        cq.commands.motion.moveabsolute([zaxis], [zstart+1], [0.5])
+        cq.commands.motion.moveabsolute([zaxis], [zstart+0.5], [1])
         cq.commands.motion.waitforinposition([zaxis])
         cq.commands.motion.waitformotiondone([zaxis])
 
-        cq.commands.motion.moveabsolute([zaxis], [zstart+0.5], [0.1])
+        cq.commands.motion.moveabsolute([zaxis], [zstart], [0.1])
         cq.commands.motion.waitforinposition([zaxis])
         cq.commands.motion.waitformotiondone([zaxis])
 
-        cq.commands.motion.moveabsolute([zaxis], [zstart], [0.01])
-        cq.commands.motion.waitforinposition([zaxis])
-        cq.commands.motion.waitformotiondone([zaxis])
-
-        cq.commands.motion.movedelay([zaxis], delay_time=1_000)
+        cq.commands.motion.movedelay([zaxis], delay_time=100)
+        cq.wait_for_empty()
 
         while True:
             statuses = check_axis_status_position(controller=controller, axis=zaxis)
@@ -618,7 +610,7 @@ def cutalumina(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
             leader_axis="Y",
             table_num=1,
             source=a1.CammingSource.PositionCommand,  # leader uses position
-            output=a1.CammingOutput.RelativePositio
+            output=a1.CammingOutput.RelativePosition
         )
 
         ## TODO: there's gotta be something else we can do with the waitforinposition and wait for move done
@@ -638,7 +630,7 @@ def cutalumina(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
         cq.commands.motion.moveabsolute(["Y"], [yend], [feedspeed])
         cq.commands.motion.waitforinposition(["Y"])
         cq.commands.motion.waitformotiondone(["Y"])
-        cq.commands.motion.movedelay(["Y"], delay_time=2_000)
+        cq.commands.motion.movedelay(["Y"], delay_time=100)
 
         am.cammingoff(follower_axis=zaxis)
 
@@ -649,6 +641,10 @@ def cutalumina(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
                 print(f"{zaxis} camming status is off, {camnum} line finished cutting.")
                 break # in desired state, stop looping
             time.sleep(0.1)
+
+        # log for one line finished cutting
+        logger.info(f"{zaxis}: Finished cutting line #{camnum}")
+
 
         # retract ZC and free table 1
         # TODO: PRIORITY 1-- CHECK IF THIS IS THE ONLY PLACE THAT SAFELIFT IS USED IN SOURCE CODE
@@ -710,35 +706,36 @@ def run_alumina_test_touch(
     cq.commands.motion.moveabsolute(["X", "Y"], [ttx, tty], [20, 20])
     cq.commands.motion.waitforinposition(["X"])
     cq.commands.motion.waitforinposition(["Y"])
-    cq.commands.motion.movedelay(["X", "Y"], delay_time = 1_000)
+    cq.commands.motion.movedelay(["X", "Y"], delay_time = 500)
 
     # Z to z_touch + 2 @ z_approach_speed
-    cq.commands.motion.moveabsolute([zaxis], [z_touch + 2.0], [10])
+    cq.commands.motion.moveabsolute([zaxis], [z_touch + 2.0], [5])
     cq.commands.motion.waitforinposition([zaxis])
 
     # Z to z_touch + 1 @ z_slow_speed
-    cq.commands.motion.moveabsolute([zaxis], [z_touch + 1.0], [0.5])
+    cq.commands.motion.moveabsolute([zaxis], [z_touch + 1.0], [1])
     cq.commands.motion.waitforinposition([zaxis])
 
     # Z to z_touch @ z_final_speed
-    cq.commands.motion.moveabsolute([zaxis], [z_touch+0.5], [0.05])
+    cq.commands.motion.moveabsolute([zaxis], [z_touch+0.5], [0.5])
     cq.commands.motion.waitforinposition([zaxis])
 
-    cq.commands.motion.moveabsolute([zaxis], [z_touch], [0.01])
+    cq.commands.motion.moveabsolute([zaxis], [z_touch], [0.1])
     cq.commands.motion.waitforinposition([zaxis])
 
     # queue-based hold at depth (ms)
     cq.commands.motion.movedelay([zaxis], delay_time=500)
 
     # retract to Z = 0
-    cq.commands.motion.moveabsolute([zaxis], [0.0], [20])
+    cq.commands.motion.moveabsolute([zaxis], [0.0], [10])
     cq.commands.motion.waitforinposition([zaxis])
-    cq.commands.motion.movedelay(['ZC'], delay_time=2_000)
+    cq.commands.motion.movedelay([zaxis], delay_time=500)
 
     # X out
     # TODO: UNCOMMENT THIS OUT PRIORITY 1
-    #cq.commands.motion.moveabsolute(["X"], [-270], [20]) 
-    #cq.commands.motion.waitforinposition(["X"])
+    cq.commands.motion.moveabsolute(["X"], [-300], [20]) 
+    cq.commands.motion.waitforinposition(["X"])
+    cq.wait_for_empty()
 
     return {
         "camnum": camnum,
