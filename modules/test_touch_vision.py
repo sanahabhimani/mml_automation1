@@ -47,7 +47,7 @@ def load_vision_models(unet_model_path, delta_model_path, device):
 
 
 def move_camera_to_test_touch(cq, camera_testtouchpath, test_touch_index, camera_zaxis,
-                              xy_speed=30, z_speed=4, settle_ms=750):
+                              camera_cover_port, flood_port, xy_speed=25, z_speed=4, settle_ms=750):
     tt_table = load_test_touch_table(camera_testtouchpath)
 
     if test_touch_index not in tt_table:
@@ -55,12 +55,17 @@ def move_camera_to_test_touch(cq, camera_testtouchpath, test_touch_index, camera
 
     camx, camy, camz = tt_table[test_touch_index]
 
+    # turn spindle flood port off
+    cq.commands.io.digitaloutputset(axis='X', output_num=flood_port, value=0)
     cq.commands.motion.moveabsolute(["X", "Y"], [camx, camy], [xy_speed, xy_speed])
     cq.commands.motion.waitforinposition(["X"])
     cq.commands.motion.waitforinposition(["Y"])
     cq.commands.motion.waitformotiondone(["X"])
     cq.commands.motion.waitformotiondone(["Y"])
     cq.commands.motion.movedelay(["X", "Y"], delay_time=settle_ms)
+
+    # Open camera cover
+    cq.commands.io.digitaloutputset(axis='X', output_num=camera_cover_port, value=1)
 
     cq.commands.motion.moveabsolute([camera_zaxis], [camz], [z_speed])
     cq.commands.motion.waitforinposition([camera_zaxis])
@@ -77,8 +82,8 @@ def move_camera_to_test_touch(cq, camera_testtouchpath, test_touch_index, camera
     }
 
 
-def capture_test_touch_image(test_touch_index, spindle, cuttype, image_output_dir,
-                             camera_session_kwargs, naming):
+def capture_test_touch_image(cq, test_touch_index, spindle, cuttype, image_output_dir,
+                             camera_session_kwargs, camera_cover_port, flood_port, naming):
     image_output_dir = Path(image_output_dir)
     image_output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -92,8 +97,19 @@ def capture_test_touch_image(test_touch_index, spindle, cuttype, image_output_di
     )
     output_path = image_output_dir / image_name
 
-    with DinoLiteSession(**camera_session_kwargs) as s:
-        capture_result = s.capture_image(output_path)
+    with DinoLiteSession(**camera_session_kwargs) as s: 
+        capture_result = s.capture_image(output_path)   
+
+    # Move delay to ensure photo has time to be taken at desired location
+    cq.commands.motion.movedelay(["X", "Y", "ZA"], delay_time=3_000)
+    # Lift camera up
+    cq.commands.motion.moveabsolute(['ZA'], [-15], [10])
+    # Close camera cover
+    cq.commands.io.digitaloutputset(axis='X', output_num=camera_cover_port, value=0)
+
+    # turn spindle flood port back on
+    cq.commands.io.digitaloutputset(axis='X', output_num=flood_port, value=1)
+    cq.wait_for_empty()
 
     return capture_result
 
