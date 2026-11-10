@@ -5,14 +5,17 @@ import logging
 from pathlib import Path
 import pandas as pd
 import re
+import csv
 
 import sys
 sys.path.append('C:\\Users\\UNIVERSITY OF CHICAG\\git\\')
 sys.path.append('C:\\Users\\UNIVERSITY OF CHICAG\\git\\metalens\\')
+sys.path.append('C:\\Users\\UNIVERSITY OF CHICAG\\git\\mml_automation1\\modules\\')
 import metalens
 from metalens import core_utils as cu
-#import test_touch_vision
-#from test_touch_vision import perform_test_touch_vision_cycle
+
+import test_touch_vision as ttv
+#from test_touch_vision import perform_test_touch_vision_cycle, move_camera_to_test_touch, capture_test_touch_image
 
 
 def check_io_status(controller, port, name, axis='X', execution_task_index=1):
@@ -505,9 +508,112 @@ def cutcamming(controller, cq, path, zaxis, cuttype, safelift, feedspeed, floodp
     with open(lockfile, "w") as f:
         f.write("")
 
+def tt_cameracapture(
+    cq,
+    cuttype,
+    test_touch_index,
+    camera_config,
+):
+    """
+    Move the Dino-Lite camera to a completed test touch, capture an image,
+    and save image metadata for later ML processing.
+    """
 
-def cutalumina(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
-               testtouchpath, wearshiftpath, lines_per_test, rot=None,):
+    #test_touch_index = touch_info["test_touch_index"]
+
+    camera_move_result = ttv.move_camera_to_test_touch(
+        cq=cq,
+        camera_testtouchpath=camera_config["camera_testtouchpath"],
+        test_touch_index=test_touch_index,
+        camera_zaxis=camera_config["camera_zaxis"],
+        camera_cover_port=camera_config.get("camera_cover_port", 4),
+        flood_port=camera_config.get('flood_port'),
+        xy_speed=camera_config.get("camera_xy_speed", 20),
+        z_speed=camera_config.get("camera_z_speed", 4),
+        settle_ms=camera_config.get("camera_settle_ms", 750),
+    )
+
+    capture_result = ttv.capture_test_touch_image(
+        cq=cq,
+        test_touch_index=test_touch_index,
+        spindle=camera_config["spindle"],
+        cuttype=cuttype,
+        image_output_dir=camera_config["image_output_dir"],
+        camera_session_kwargs=camera_config["camera_session_kwargs"],
+        camera_cover_port=camera_config.get("camera_cover_port", 4),
+        flood_port=camera_config.get('flood_port'),
+        naming=camera_config["naming"],
+    )
+
+    # Save metadata needed to associate this image with later ML analysis.
+    capture_result["test_touch_index"] = test_touch_index
+    #capture_result["camnum"] = touch_info["camnum"]
+
+    log_dir = Path(camera_config["image_output_dir"])
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    log_path = Path(
+        camera_config.get(
+            "capture_log_path",
+            log_dir / "tt_camera_capture_log.csv",
+        )
+    )
+
+    fieldnames = [
+        "timestamp",
+        "test_touch_index",
+        "camnum",
+        "spindle",
+        "cuttype",
+        "image_name",
+        "image_path",
+        "fovx_mm",
+        "amr",
+        "camera_X",
+        "camera_Y",
+        "camera_Z",
+    ]
+
+    write_header = (
+        not log_path.exists()
+        or log_path.stat().st_size == 0
+    )
+
+    with log_path.open("a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+
+        if write_header:
+            writer.writeheader()
+
+        writer.writerow(
+            {
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "test_touch_index": test_touch_index,
+                #"camnum": touch_info["camnum"],
+                "spindle": camera_config["spindle"],
+                "cuttype": cuttype,
+                "image_name": capture_result["image_name"],
+                "image_path": capture_result["image_path"],
+                "fovx_mm": capture_result["fovx_mm"],
+                "amr": capture_result["amr"],
+                "camera_X": camera_move_result["camera_X"],
+                "camera_Y": camera_move_result["camera_Y"],
+                "camera_Z": camera_move_result["camera_Z"],
+            }
+        )
+
+    cq.commands.motion.moveabsolute(["ZA"], [-15], [10])
+
+    return {
+       # "touch_info": touch_info,
+        "camera_move_result": camera_move_result,
+        "capture_result": capture_result,
+        "capture_log_path": str(log_path),
+    }
+    
+
+def cutalumina(controller, cq, path, zaxis, cuttype, safelift, feedspeed, floodport,  
+               testtouchpath, wearshiftpath, lines_per_test, rot=None, camera_config=None):
     path = Path(path)
     assert path.exists(), f"Base path not found: {path}"
 
@@ -535,8 +641,13 @@ def cutalumina(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
     logger.setLevel(logging.INFO)
 
     # clear old handlers so you don't get duplicates
-    if logger.hasHandlers():
-        logger.handlers.clear()
+    #if logger.hasHandlers():
+    #    logger.handlers.clear()
+
+    for handler in logger.handlers[:]:
+        handler.flush()
+        handler.close()
+        logger.removeHandler(handler)
 
     fh = logging.FileHandler(log_path)
     ch = logging.StreamHandler()
@@ -577,7 +688,6 @@ def cutalumina(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
         SPEED_Y  = 20.0  # mm/s
         SPEED_X  = 20.0
         SPEED_Z = 12.0  # (down to zstart+2)
-        # TODO: PRIORITY 1 --- check if we want ZC touch speed to be slower
         SPEED_Z_TOUCH    = 0.1  # (final settle at zstart)
 
         # move to start positions, wait for in position
@@ -592,7 +702,7 @@ def cutalumina(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
         cq.commands.motion.waitforinposition([zaxis])
         cq.commands.motion.waitformotiondone([zaxis])
 
-        cq.commands.motion.moveabsolute([zaxis], [zstart], [0.1])
+        cq.commands.motion.moveabsolute([zaxis], [zstart], [SPEED_Z_TOUCH])
         cq.commands.motion.waitforinposition([zaxis])
         cq.commands.motion.waitformotiondone([zaxis])
 
@@ -613,8 +723,6 @@ def cutalumina(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
             output=a1.CammingOutput.RelativePosition
         )
 
-        ## TODO: there's gotta be something else we can do with the waitforinposition and wait for move done
-        ## TODO: something about InPositionTime value that we might be able to toggle
         while True:
             statuses = check_axis_status_position(controller=controller, axis=zaxis)
             if statuses['camming_bit'] is True:
@@ -645,9 +753,7 @@ def cutalumina(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
         # log for one line finished cutting
         logger.info(f"{zaxis}: Finished cutting line #{camnum}")
 
-
         # retract ZC and free table 1
-        # TODO: PRIORITY 1-- CHECK IF THIS IS THE ONLY PLACE THAT SAFELIFT IS USED IN SOURCE CODE
         cq.commands.motion.moveabsolute([zaxis], [zstart + safelift], [SPEED_Z])
         cq.commands.motion.waitforinposition([zaxis])
         cq.commands.motion.waitformotiondone([zaxis])
@@ -657,22 +763,44 @@ def cutalumina(controller, cq, path, zaxis, cuttype, safelift, feedspeed,
         # drain the queue before we are ready to cut the next line
         cq.wait_for_empty()
 
-
         if (camnum_int + 1) % lines_per_test == 0:
+            
             info = run_alumina_test_touch(
-                controller = controller,
+                controller=controller,
                 cq=cq,
                 camnum=camnum,
                 testtouchpath = testtouchpath,
                 wearshiftpath=wearshiftpath,
                 zaxis=zaxis,
                 lines_per_test=lines_per_test,
+                rot=rot
             )
             print(f"did test touch #{info['test_touch_index']}", info)
 
-
-    cq.commands.motion.moveabsolute([zaxis], [0.0], [15])
+            if camera_config is not None:
+                cq.commands.motion.moveabsolute(["U"], [0], [20])
+                cq.commands.motion.waitforinposition(["U"])
+                cq.commands.motion.waitformotiondone(["U"])
+                cq.commands.motion.movedelay(["U"], delay_time=1_000)    
+                camera_result = tt_cameracapture(cq=cq,
+                                                 cuttype=cuttype,
+                                                 test_touch_index=info['test_touch_index'],
+                                                 camera_config=camera_config)
+                print(f'Captured image for tt #{info['test_touch_index']}'
+                      f'{camera_result['capture_result']['image_path']}')
+                cq.commands.motion.moveabsolute(["U"], [rot], [20])
+                cq.commands.motion.waitforinposition(["U"])
+                cq.commands.motion.waitformotiondone(["U"])
+                cq.commands.motion.movedelay(["U"], delay_time=1_000)                
+    # turn off flood cooling
+    cq.commands.io.digitaloutputset(axis='X', output_num=floodport, value=0)
+    cq.commands.motion.moveabsolute([zaxis], [0.0], [11])
     controller.runtime.commands.end_command_queue(cq)
+
+    # close logging file because windows computer:
+    for handler in logger.handlers[:]:
+        handler.close()
+        logger.removeHandler(handler)
 
     lockfile = path/'lockfile.lock'
     with open(lockfile, "w") as f:
@@ -687,8 +815,14 @@ def run_alumina_test_touch(
     wearshiftpath,
     zaxis,
     lines_per_test,
-):
+    rot):
+
     camnum = int(camnum)
+
+    cq.commands.motion.moveabsolute(["U"], [0], [20])
+    cq.commands.motion.waitforinposition(["U"])
+    cq.commands.motion.waitformotiondone(["U"])
+    cq.commands.motion.movedelay(["U"], delay_time=1_000)
 
     tt_table = load_test_touch_table(testtouchpath)
     ws_table = load_wear_shift_table(wearshiftpath)
@@ -731,20 +865,24 @@ def run_alumina_test_touch(
     cq.commands.motion.waitforinposition([zaxis])
     cq.commands.motion.movedelay([zaxis], delay_time=500)
 
-    # X out
-    # TODO: UNCOMMENT THIS OUT PRIORITY 1
-    cq.commands.motion.moveabsolute(["X"], [-300], [20]) 
+
+    # X and U out
+    cq.commands.motion.moveabsolute(["X"], [-300], [28])
+    cq.commands.motion.moveabsolute(["U"], [rot], [20])
+    cq.commands.motion.waitforinposition(["U"])
+    cq.commands.motion.waitformotiondone(["U"])
+    cq.commands.motion.movedelay(["U"], delay_time=1_000)
     cq.commands.motion.waitforinposition(["X"])
     cq.wait_for_empty()
-
-    return {
-        "camnum": camnum,
-        "test_touch_index": tt_index,
-        "X": ttx, "Y": tty,
-        "Z_test_touch_raw": ttz,
-        "wear_shift": wear_shift,
-        "Z_touch_final": z_touch,
-    }
+    
+    return {"camnum": camnum,
+            "test_touch_index": tt_index,
+            "X": ttx,
+            "Y": tty,
+            "Z_test_touch_raw": ttz,
+            "wear_shift": wear_shift,
+            "Z_touch_final": z_touch,
+}
 
 
 def run_test_touch(
