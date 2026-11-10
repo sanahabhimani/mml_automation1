@@ -196,6 +196,18 @@ def run_ml_on_test_touch_image(image_path, fov_mm, models, threshold=None, overl
         image_path, fov_mm, models, threshold=threshold, overlay_dir=overlay_dir)
 
 
+def _touch_label(touch_info):
+    """'[SpindleC Thin] ' in front of a log message, so test touch #48 of SpindleB and of SpindleC can be told apart.
+
+    Empty when no spindle was given, in which case the message is exactly what it was before.
+    """
+    spindle = (touch_info or {}).get("spindle")
+    if not spindle:
+        return ""
+    cuttype = touch_info.get("cuttype")
+    return f"[{spindle} {cuttype}] " if cuttype else f"[{spindle}] "
+
+
 def append_test_touch_prediction_log(path, touch_info, ml_result):
     log_path = Path(path) / "test_touch.log"
 
@@ -219,13 +231,14 @@ def append_test_touch_prediction_log(path, touch_info, ml_result):
     fh.setFormatter(formatter)
     logger.addHandler(fh)
 
+    label = _touch_label(touch_info)
     if pred is None:
         logger.info(
-            f"Performed test touch #{touch_info['test_touch_index']} | pred_length_mm=None"
+            f"{label}Performed test touch #{touch_info['test_touch_index']} | pred_length_mm=None"
         )
     else:
         logger.info(
-            f"Performed test touch #{touch_info['test_touch_index']} | "
+            f"{label}Performed test touch #{touch_info['test_touch_index']} | "
             f"pred_length_mm={pred['pred_length_mm']:.6f}"
         )
 
@@ -417,6 +430,8 @@ def write_test_touch_detail_log(path, touch_info, image_path, fov_mm, fov_source
         selected = (ml_result or {}).get("selected_prediction")
         record = dict(
             time=datetime.now().isoformat(timespec="seconds"),
+            spindle=touch_info.get("spindle"),
+            cuttype=touch_info.get("cuttype"),
             test_touch_index=touch_info["test_touch_index"],
             image=Path(image_path).name,
             fov_mm=fov_mm,
@@ -458,7 +473,7 @@ def _vision_step(path, touch_info, image_path, vision_config, capture_result=Non
         )
         assessment = assess_prediction(ml_result, vision_config, fov_mm=fov_mm, fov_source=fov_source)
         for reason in assessment["reasons"]:
-            logger.warning("Test touch #%s: %s (%s)", index, reason, image_path)
+            logger.warning("%sTest touch #%s: %s (%s)", _touch_label(touch_info), index, reason, image_path)
         append_test_touch_prediction_log(path=path, touch_info=touch_info, ml_result=ml_result)
         write_test_touch_detail_log(path, touch_info, image_path, fov_mm, fov_source, ml_result, assessment, models,
                                     capture_result=capture_result)
@@ -467,7 +482,7 @@ def _vision_step(path, touch_info, image_path, vision_config, capture_result=Non
     except Exception as exc:
         if vision_config.get("on_vision_error", "raise") != "log_none":
             raise
-        logger.exception("Test touch #%s: the vision step failed; logging pred_length_mm=None", index)
+        logger.exception("%sTest touch #%s: the vision step failed; logging pred_length_mm=None", _touch_label(touch_info), index)
         ml_result = {"selected_prediction": None, "error": repr(exc)}
         assessment = dict(status="error", reasons=[repr(exc)], n_touches=None)
         append_test_touch_prediction_log(path=path, touch_info=touch_info, ml_result=ml_result)
@@ -483,12 +498,15 @@ def record_no_image(path, touch_info, reason, camera_config=None):
     Writes pred_length_mm=None to test_touch.log and a status="no_image" line to test_touch_detail.jsonl,
     so every test touch has an entry. Returns the assessment dict.
     """
+    if not touch_info.get("spindle") and (camera_config or {}).get("spindle"):
+        touch_info = {**touch_info, "spindle": camera_config["spindle"]}
     ml_result = {"selected_prediction": None, "error": reason}
     assessment = dict(status="no_image", reasons=[reason], n_touches=None)
     append_test_touch_prediction_log(path=path, touch_info=touch_info, ml_result=ml_result)
     write_test_touch_detail_log(path, touch_info, "", None, "n/a", ml_result, assessment,
                                 (camera_config or {}).get("models"))
-    logger.warning("Test touch #%s: %s; logged pred_length_mm=None", touch_info["test_touch_index"], reason)
+    logger.warning("%sTest touch #%s: %s; logged pred_length_mm=None", _touch_label(touch_info),
+                   touch_info["test_touch_index"], reason)
     return assessment
 
 
@@ -537,7 +555,8 @@ def predict_from_capture_log(capture_log_path, vision_config, log_dir, spindle=N
         image_path = Path(row["image_path"]) if row.get("image_path") else capture_log_path.parent / image_name
         if not image_path.is_file() and (capture_log_path.parent / image_name).is_file():
             image_path = capture_log_path.parent / image_name
-        touch_info = {"test_touch_index": int(float(row["test_touch_index"]))}
+        touch_info = {"test_touch_index": int(float(row["test_touch_index"])),
+                      "spindle": row.get("spindle"), "cuttype": row.get("cuttype")}
         capture_like = {"image_path": str(image_path), "fovx_mm": row.get("fovx_mm"), "amr": row.get("amr")}
         step = _vision_step(folder, touch_info, image_path, config, capture_result=capture_like)
         results.append({"touch_info": touch_info, "row": row, **step})
@@ -550,6 +569,7 @@ def predict_test_touch_from_saved_image(path, spindle, cuttype, touch_info, visi
     The image path is rebuilt from the same naming pieces the capture step uses. fov_mm=None resolves the
     FOV from vision_config (override, then capture_log_path).
     """
+    touch_info = {**touch_info, "spindle": spindle, "cuttype": cuttype}
     image_path = expected_test_touch_image_path(spindle, cuttype, touch_info["test_touch_index"], vision_config)
     step = _vision_step(path, touch_info, image_path, vision_config, capture_result=None, fov_mm=fov_mm)
     return {"touch_info": touch_info, "camera_move_result": None, "capture_result": None, **step}
@@ -566,6 +586,7 @@ def predict_test_touch_from_capture(path, spindle, cuttype, touch_info, camera_c
     (pred_length_mm=None plus the reason in test_touch_detail.jsonl) and the cut continues.
     Returns None when no models were provided.
     """
+    touch_info = {**touch_info, "spindle": spindle, "cuttype": cuttype}
     if camera_config.get("models") is None:
         logger.warning("No vision models in camera_config; skipping the prediction for test touch #%s",
                        touch_info["test_touch_index"])
@@ -584,6 +605,7 @@ def perform_test_touch_vision_cycle(cq, path, spindle, cuttype, touch_info, visi
     """Move the camera, capture, then predict (used by the lens-cutting flow). Same move/capture helpers as
     tt_cameracapture(); vision_config needs camera_testtouchpath, camera_zaxis, flood_port, image_output_dir,
     camera_session_kwargs, naming and models."""
+    touch_info = {**touch_info, "spindle": spindle, "cuttype": cuttype}
     camera_move_result = move_camera_to_test_touch(
         cq=cq,
         camera_testtouchpath=vision_config["camera_testtouchpath"],

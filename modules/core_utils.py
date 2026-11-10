@@ -817,7 +817,8 @@ def cutalumina(controller, cq, path, zaxis, cuttype, safelift, feedspeed, floodp
                     # Camera problem (already announced in tt_cameracapture): no picture, so no measurement for this
                     # test touch. Record that in test_touch.log and carry on with the remaining cuts.
                     if camera_config.get("models") is not None:
-                        ttv.record_no_image(path=path, touch_info=info,
+                        ttv.record_no_image(path=path,
+                                            touch_info={**info, "spindle": camera_config.get("spindle"), "cuttype": cuttype},
                                             reason="camera could not capture an image",
                                             camera_config=camera_config)
                 else:
@@ -837,12 +838,12 @@ def cutalumina(controller, cq, path, zaxis, cuttype, safelift, feedspeed, floodp
                                 camera_config=camera_config,
                                 capture_result=camera_result["capture_result"],
                             )
-                            logger.info(f"Vision for tt #{info['test_touch_index']}: "
+                            logger.info(f"Vision for {camera_config['spindle']} tt #{info['test_touch_index']}: "
                                         f"status={vision_result['assessment']['status']}, "
                                         f"FOV {vision_result['fov_mm']} mm ({vision_result['fov_source']}), "
                                         f"reasons={vision_result['assessment']['reasons']}")
                         except Exception as exc:
-                            logger.warning(f"Vision step failed for tt #{info['test_touch_index']}: {exc!r}")
+                            logger.warning(f"Vision step failed for {camera_config.get('spindle')} tt #{info['test_touch_index']}: {exc!r}")
                 cq.commands.motion.moveabsolute(["U"], [rot], [20])
                 cq.commands.motion.waitforinposition(["U"])
                 cq.commands.motion.waitformotiondone(["U"])
