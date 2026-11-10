@@ -508,6 +508,15 @@ def cutcamming(controller, cq, path, zaxis, cuttype, safelift, feedspeed, floodp
     with open(lockfile, "w") as f:
         f.write("")
 
+def _announce_camera_problem(message):
+    """Print and log (to cutting.log, while a cut is running) a camera problem that does not stop the cuts."""
+    cut_logger = logging.getLogger("cut_logger")
+    if cut_logger.handlers:
+        cut_logger.warning(message)
+    else:
+        print(message)
+
+
 def tt_cameracapture(
     cq,
     cuttype,
@@ -545,6 +554,19 @@ def tt_cameracapture(
         naming=camera_config["naming"],
     )
 
+    if capture_result is None:
+        # The camera could not take a picture (for example "no frame available"). ttv.capture_test_touch_image has
+        # already lifted the camera, closed the cover and turned the flood back on. Announce it; the cuts carry on.
+        _announce_camera_problem(
+            f"Camera could not capture an image for test touch #{test_touch_index} ({cuttype}); "
+            "no picture was taken. The cuts continue without a measurement for this test touch.")
+        return {
+            "camera_move_result": camera_move_result,
+            "capture_result": None,
+            "capture_log_path": None,
+            "error": "camera could not capture an image",
+        }
+
     # Save metadata needed to associate this image with later ML analysis.
     capture_result["test_touch_index"] = test_touch_index
     #capture_result["camnum"] = touch_info["camnum"]
@@ -574,33 +596,38 @@ def tt_cameracapture(
         "camera_Z",
     ]
 
-    write_header = (
-        not log_path.exists()
-        or log_path.stat().st_size == 0
-    )
-
-    with log_path.open("a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-
-        if write_header:
-            writer.writeheader()
-
-        writer.writerow(
-            {
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "test_touch_index": test_touch_index,
-                #"camnum": touch_info["camnum"],
-                "spindle": camera_config["spindle"],
-                "cuttype": cuttype,
-                "image_name": capture_result["image_name"],
-                "image_path": capture_result["image_path"],
-                "fovx_mm": capture_result["fovx_mm"],
-                "amr": capture_result["amr"],
-                "camera_X": camera_move_result["camera_X"],
-                "camera_Y": camera_move_result["camera_Y"],
-                "camera_Z": camera_move_result["camera_Z"],
-            }
+    try:
+        write_header = (
+            not log_path.exists()
+            or log_path.stat().st_size == 0
         )
+
+        with log_path.open("a", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+
+            if write_header:
+                writer.writeheader()
+
+            writer.writerow(
+                {
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "test_touch_index": test_touch_index,
+                    #"camnum": touch_info["camnum"],
+                    "spindle": camera_config["spindle"],
+                    "cuttype": cuttype,
+                    "image_name": capture_result["image_name"],
+                    "image_path": capture_result["image_path"],
+                    "fovx_mm": capture_result["fovx_mm"],
+                    "amr": capture_result["amr"],
+                    "camera_X": camera_move_result["camera_X"],
+                    "camera_Y": camera_move_result["camera_Y"],
+                    "camera_Z": camera_move_result["camera_Z"],
+                }
+            )
+    except OSError as exc:
+        _announce_camera_problem(
+            f"Could not append to the capture log {log_path} ({exc!r}); is it open in Excel? "
+            "The picture was taken and the cuts continue.")
 
     cq.commands.motion.moveabsolute(["ZA"], [-15], [10])
 
@@ -786,8 +813,36 @@ def cutalumina(controller, cq, path, zaxis, cuttype, safelift, feedspeed, floodp
                                                  cuttype=cuttype,
                                                  test_touch_index=info['test_touch_index'],
                                                  camera_config=camera_config)
-                print(f'Captured image for tt #{info['test_touch_index']}'
-                      f'{camera_result['capture_result']['image_path']}')
+                if camera_result["capture_result"] is None:
+                    # Camera problem (already announced in tt_cameracapture): no picture, so no measurement for this
+                    # test touch. Record that in test_touch.log and carry on with the remaining cuts.
+                    if camera_config.get("models") is not None:
+                        ttv.record_no_image(path=path, touch_info=info,
+                                            reason="camera could not capture an image",
+                                            camera_config=camera_config)
+                else:
+                    print(f'Captured image for tt #{info['test_touch_index']}'
+                          f'{camera_result['capture_result']['image_path']}')
+
+                    # NEW: predict the test-touch length from the image that was just captured. Runs only when
+                    # camera_config contains "models" (from ttv.load_vision_models). A vision problem is logged
+                    # and never stops the cut. Writes test_touch.log and test_touch_detail.jsonl into `path`.
+                    if camera_config.get("models") is not None:
+                        try:
+                            vision_result = ttv.predict_test_touch_from_capture(
+                                path=path,
+                                spindle=camera_config["spindle"],
+                                cuttype=cuttype,
+                                touch_info=info,
+                                camera_config=camera_config,
+                                capture_result=camera_result["capture_result"],
+                            )
+                            logger.info(f"Vision for tt #{info['test_touch_index']}: "
+                                        f"status={vision_result['assessment']['status']}, "
+                                        f"FOV {vision_result['fov_mm']} mm ({vision_result['fov_source']}), "
+                                        f"reasons={vision_result['assessment']['reasons']}")
+                        except Exception as exc:
+                            logger.warning(f"Vision step failed for tt #{info['test_touch_index']}: {exc!r}")
                 cq.commands.motion.moveabsolute(["U"], [rot], [20])
                 cq.commands.motion.waitforinposition(["U"])
                 cq.commands.motion.waitformotiondone(["U"])
@@ -830,7 +885,7 @@ def run_alumina_test_touch(
     tt_index = camnum // lines_per_test
     print('tt index', tt_index)
     if tt_index not in tt_table:
-        raise KeyError(f"Test-touch index {tt_index} not found in {test_touch_file}")
+        raise KeyError(f"Test-touch index {tt_index} not found in {testtouchpath}")
 
     ttx, tty, ttz = tt_table[tt_index]
     wear_shift = ws_table.get(camnum, 0.0)
@@ -1191,7 +1246,7 @@ def cutlens_segments(controller, cq, path, spindle, zaxis, cuttype, safelift, fe
 
             vision_result = None
             if vision_config is not None:
-                vision_result = perform_test_touch_vision_cycle(
+                vision_result = ttv.perform_test_touch_vision_cycle(
                     cq=cq,
                     path=path,
                     spindle=spindle,
