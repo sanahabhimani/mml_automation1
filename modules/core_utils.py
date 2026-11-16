@@ -640,7 +640,8 @@ def tt_cameracapture(
     
 
 def cutalumina(controller, cq, path, zaxis, cuttype, safelift, feedspeed, floodport,  
-               testtouchpath, wearshiftpath, lines_per_test, rot=None, camera_config=None):
+               testtouchpath, wearshiftpath, lines_per_test, rot=None, camera_config=None,
+               tt_index_offset=0):
     path = Path(path)
     assert path.exists(), f"Base path not found: {path}"
 
@@ -800,7 +801,8 @@ def cutalumina(controller, cq, path, zaxis, cuttype, safelift, feedspeed, floodp
                 wearshiftpath=wearshiftpath,
                 zaxis=zaxis,
                 lines_per_test=lines_per_test,
-                rot=rot
+                rot=rot,
+                tt_index_offset=tt_index_offset
             )
             print(f"did test touch #{info['test_touch_index']}", info)
 
@@ -871,7 +873,8 @@ def run_alumina_test_touch(
     wearshiftpath,
     zaxis,
     lines_per_test,
-    rot):
+    rot,
+    tt_index_offset=0):
 
     camnum = int(camnum)
 
@@ -883,7 +886,7 @@ def run_alumina_test_touch(
     tt_table = load_test_touch_table(testtouchpath)
     ws_table = load_wear_shift_table(wearshiftpath)
 
-    tt_index = camnum // lines_per_test
+    tt_index = camnum // lines_per_test + tt_index_offset
     print('tt index', tt_index)
     if tt_index not in tt_table:
         raise KeyError(f"Test-touch index {tt_index} not found in {testtouchpath}")
